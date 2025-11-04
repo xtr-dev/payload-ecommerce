@@ -1,112 +1,101 @@
-import type { CollectionSlug, Config } from 'payload'
+import type { CollectionConfig, Config } from 'payload'
+import { Products } from './collections/Products.js'
+import { Categories } from './collections/index.js'
+import { createOrders } from './collections/Orders.js'
+import { Carts } from './collections/Carts.js'
+import { Coupons } from './collections/Coupons.js'
 
-import { customEndpointHandler } from './endpoints/customEndpointHandler.js'
+export type CollectionExtender = (baseCollection: CollectionConfig) => CollectionConfig
+
+export { Products, Categories, Carts, Coupons }
+export { useEcommerce } from './lib/useEcommerce.js'
+export type { EcommerceHelpers } from './lib/useEcommerce.js'
 
 export type PayloadEcommerceConfig = {
-  /**
-   * List of collections to add a custom field
-   */
-  collections?: Partial<Record<CollectionSlug, true>>
+  collections?: {
+    products?: string | CollectionExtender
+    orders?: string | CollectionExtender
+    categories?: string | CollectionExtender
+    carts?: string | CollectionExtender
+    coupons?: string | CollectionExtender
+  }
+
+  userCollection?: string
+
+  payments?: {
+    providers: ('stripe' | 'paypal' | 'square')[]
+    currency: string
+    testMode?: boolean
+  }
+
+  emails?: {
+    enabled: boolean
+    from?: string
+    fromName?: string
+  }
+
+  shipping?: {
+    enabled: boolean
+    freeShippingThreshold?: number
+    rates?: Array<{
+      name: string
+      price: number
+      minOrder?: number
+    }>
+  }
+
+  hooks?: {
+    beforeCreateOrder?: (order: any) => Promise<any>
+    afterCreateOrder?: (order: any) => Promise<void>
+    beforePayment?: (order: any) => Promise<void>
+    afterPayment?: (order: any) => Promise<void>
+  }
+
   disabled?: boolean
 }
 
+const processCollection = (
+  baseCollection: CollectionConfig,
+  config: string | CollectionExtender | undefined,
+  defaultSlug: string,
+): CollectionConfig => {
+  if (typeof config === 'function') {
+    return config(baseCollection)
+  }
+
+  const slug = typeof config === 'string' ? config : defaultSlug
+
+  return {
+    ...baseCollection,
+    slug,
+  }
+}
+
 export const payloadEcommerce =
-  (pluginOptions: PayloadEcommerceConfig) =>
+  (pluginOptions: PayloadEcommerceConfig = {}) =>
   (config: Config): Config => {
     if (!config.collections) {
       config.collections = []
     }
 
-    config.collections.push({
-      slug: 'plugin-collection',
-      fields: [
-        {
-          name: 'id',
-          type: 'text',
-        },
-      ],
-    })
+    const {
+      collections: customCollections = {},
+      userCollection = 'users',
+      disabled = false,
+    } = pluginOptions
 
-    if (pluginOptions.collections) {
-      for (const collectionSlug in pluginOptions.collections) {
-        const collection = config.collections.find(
-          (collection) => collection.slug === collectionSlug,
-        )
+    const Orders = createOrders(pluginOptions)
 
-        if (collection) {
-          collection.fields.push({
-            name: 'addedByPlugin',
-            type: 'text',
-            admin: {
-              position: 'sidebar',
-            },
-          })
-        }
-      }
-    }
+    config.collections.push(
+      processCollection(Products, customCollections.products, 'products'),
+      processCollection(Categories, customCollections.categories, 'categories'),
+      processCollection(Orders, customCollections.orders, 'orders'),
+      processCollection(Carts, customCollections.carts, 'carts'),
+      processCollection(Coupons, customCollections.coupons, 'coupons'),
+    )
 
-    /**
-     * If the plugin is disabled, we still want to keep added collections/fields so the database schema is consistent which is important for migrations.
-     * If your plugin heavily modifies the database schema, you may want to remove this property.
-     */
-    if (pluginOptions.disabled) {
+    if (disabled) {
       return config
-    }
-
-    if (!config.endpoints) {
-      config.endpoints = []
-    }
-
-    if (!config.admin) {
-      config.admin = {}
-    }
-
-    if (!config.admin.components) {
-      config.admin.components = {}
-    }
-
-    if (!config.admin.components.beforeDashboard) {
-      config.admin.components.beforeDashboard = []
-    }
-
-    config.admin.components.beforeDashboard.push(
-      `payload-ecommerce/client#BeforeDashboardClient`,
-    )
-    config.admin.components.beforeDashboard.push(
-      `payload-ecommerce/rsc#BeforeDashboardServer`,
-    )
-
-    config.endpoints.push({
-      handler: customEndpointHandler,
-      method: 'get',
-      path: '/my-plugin-endpoint',
-    })
-
-    const incomingOnInit = config.onInit
-
-    config.onInit = async (payload) => {
-      // Ensure we are executing any existing onInit functions before running our own.
-      if (incomingOnInit) {
-        await incomingOnInit(payload)
-      }
-
-      const { totalDocs } = await payload.count({
-        collection: 'plugin-collection',
-        where: {
-          id: {
-            equals: 'seeded-by-plugin',
-          },
-        },
-      })
-
-      if (totalDocs === 0) {
-        await payload.create({
-          collection: 'plugin-collection',
-          data: {
-            id: 'seeded-by-plugin',
-          },
-        })
-      }
     }
 
     return config

@@ -176,9 +176,8 @@ Complete order management from checkout to fulfillment.
 - `trackingUrl` (string) - Tracking URL
 
 **Hooks:**
-- `beforeCreate` - Generate order number, validate inventory
-- `afterCreate` - Send confirmation email, reduce inventory
-- `afterChange` - Send status update emails
+- `beforeChange` - Generate order number, call custom `beforeCreateOrder` hook
+- `afterChange` - Reduce product inventory, increment coupon usage, call custom `afterCreateOrder` hook
 
 ### Carts
 
@@ -220,6 +219,149 @@ Flexible discount and promotion system.
 
 **Hooks:**
 - `beforeChange` - Validate dates, update status
+
+## Using the Ecommerce Utilities
+
+### Server-Side: useEcommerce Hook
+
+The `useEcommerce` hook provides a complete library of utility functions for interacting with the plugin from server-side code (API routes, hooks, etc.):
+
+```typescript
+import { getPayload } from 'payload'
+import { useEcommerce } from '@xtr-dev/payload-ecommerce'
+import config from '@payload-config'
+
+const payload = await getPayload({ config })
+const ecommerce = useEcommerce(payload)
+
+// Cart operations
+await ecommerce.cart.addToCart({
+  productId: 'product-id',
+  quantity: 2,
+  userId: 'user-id',
+})
+
+await ecommerce.cart.updateCartItem({
+  cartId: 'cart-id',
+  productId: 'product-id',
+  quantity: 3,
+})
+
+const cart = await ecommerce.cart.getCart('user-id')
+
+// Order operations
+const order = await ecommerce.orders.createOrderFromCart({
+  cartId: 'cart-id',
+  shippingAddress: {
+    firstName: 'John',
+    lastName: 'Doe',
+    address1: '123 Main St',
+    city: 'New York',
+    state: 'NY',
+    postalCode: '10001',
+    country: 'US',
+  },
+})
+
+await ecommerce.orders.updateOrderStatus({
+  orderId: 'order-id',
+  status: 'shipped',
+  trackingNumber: '1Z999AA10123456784',
+})
+
+const userOrders = await ecommerce.orders.getUserOrders('user-id')
+
+// Product operations
+const product = await ecommerce.products.getProduct('product-id')
+
+const products = await ecommerce.products.getProducts({
+  category: 'category-id',
+  status: 'active',
+  minPrice: 10,
+  maxPrice: 100,
+  search: 'shirt',
+  limit: 20,
+  page: 1,
+})
+
+const inventoryCheck = await ecommerce.products.checkInventory('product-id', 5)
+
+// Coupon operations
+const validation = await ecommerce.coupons.validateCoupon({
+  code: 'SUMMER2024',
+  cartTotal: 150,
+  userId: 'user-id',
+  productIds: ['product-1', 'product-2'],
+})
+
+if (validation.valid) {
+  console.log(`Discount: $${validation.discount}`)
+}
+```
+
+### Client-Side: React Hooks
+
+For client-side React components, use the provided hooks:
+
+```typescript
+'use client'
+
+import { useCart, useProducts, useOrders } from '@xtr-dev/payload-ecommerce/client'
+
+function CartComponent() {
+  const { cart, loading, error, fetchCart, addToCart, updateCartItem, removeFromCart } = useCart()
+
+  React.useEffect(() => {
+    fetchCart()
+  }, [fetchCart])
+
+  const handleAddToCart = async () => {
+    await addToCart('product-id', 1)
+  }
+
+  if (loading) return <div>Loading...</div>
+  if (error) return <div>Error: {error}</div>
+
+  return (
+    <div>
+      <h2>Cart Items: {cart?.items?.length || 0}</h2>
+      <button onClick={handleAddToCart}>Add to Cart</button>
+    </div>
+  )
+}
+
+function ProductsComponent() {
+  const { products, loading, fetchProducts, getProduct } = useProducts()
+
+  React.useEffect(() => {
+    fetchProducts({ status: 'active', limit: 10 })
+  }, [fetchProducts])
+
+  return (
+    <div>
+      {products.map((product) => (
+        <div key={product.id}>{product.title}</div>
+      ))}
+    </div>
+  )
+}
+
+function OrdersComponent() {
+  const { orders, loading, fetchOrders, getOrder } = useOrders()
+
+  React.useEffect(() => {
+    fetchOrders()
+  }, [fetchOrders])
+
+  return (
+    <div>
+      {orders.map((order) => (
+        <div key={order.id}>Order #{order.orderNumber}</div>
+      ))}
+    </div>
+  )
+}
+```
 
 ## API Usage
 
@@ -428,12 +570,13 @@ interface PayloadEcommerceConfig {
   extendUserCollection?: boolean
 
   // Collection slugs (customize if needed)
+  // Pass a string to change the slug, or a function to extend the collection
   collections?: {
-    products?: string
-    orders?: string
-    categories?: string
-    carts?: string
-    coupons?: string
+    products?: string | ((baseCollection: CollectionConfig) => CollectionConfig)
+    orders?: string | ((baseCollection: CollectionConfig) => CollectionConfig)
+    categories?: string | ((baseCollection: CollectionConfig) => CollectionConfig)
+    carts?: string | ((baseCollection: CollectionConfig) => CollectionConfig)
+    coupons?: string | ((baseCollection: CollectionConfig) => CollectionConfig)
   }
 
   // Payment configuration
@@ -487,6 +630,123 @@ interface PayloadEcommerceConfig {
     afterPayment?: (order: Order, paymentResult: any) => Promise<void>
   }
 }
+```
+
+### Extending Collections
+
+You can extend the base collections by passing a function instead of a string. The function receives the base collection configuration and should return a modified version:
+
+```typescript
+import { buildConfig } from 'payload'
+import { payloadEcommerce } from '@xtr-dev/payload-ecommerce'
+
+export default buildConfig({
+  plugins: [
+    payloadEcommerce({
+      collections: {
+        // Simple slug customization
+        orders: 'shop-orders',
+
+        // Extend the products collection with custom fields
+        products: (baseCollection) => ({
+          ...baseCollection,
+          slug: 'shop-products', // Optional: change the slug
+          fields: [
+            ...baseCollection.fields,
+            // Add custom fields
+            {
+              name: 'brand',
+              type: 'text',
+            },
+            {
+              name: 'weight',
+              type: 'number',
+              admin: {
+                description: 'Product weight in kg',
+              },
+            },
+          ],
+        }),
+
+        // Add custom admin configuration
+        categories: (baseCollection) => ({
+          ...baseCollection,
+          admin: {
+            ...baseCollection.admin,
+            group: 'Shop',
+            description: 'Manage product categories',
+          },
+        }),
+      },
+    }),
+  ],
+})
+```
+
+### Custom Hooks
+
+Use custom hooks to integrate with external services, send notifications, or add custom business logic:
+
+```typescript
+import { buildConfig } from 'payload'
+import { payloadEcommerce } from '@xtr-dev/payload-ecommerce'
+
+export default buildConfig({
+  plugins: [
+    payloadEcommerce({
+      hooks: {
+        // Called before creating an order (can modify order data)
+        beforeCreateOrder: async (order) => {
+          // Add custom order number prefix
+          if (order.orderNumber) {
+            order.orderNumber = `STORE-${order.orderNumber}`
+          }
+
+          // Validate custom business rules
+          if (order.total > 10000) {
+            throw new Error('Orders over $10,000 require manual approval')
+          }
+
+          return order
+        },
+
+        // Called after creating an order
+        afterCreateOrder: async (order) => {
+          // Send email notification
+          await sendEmail({
+            to: order.user.email,
+            subject: `Order Confirmation #${order.orderNumber}`,
+            body: `Thank you for your order! Total: $${order.total}`,
+          })
+
+          // Notify shipping fulfillment system
+          await notifyWarehouse(order)
+
+          // Track in analytics
+          await analytics.track('order_created', {
+            orderId: order.id,
+            total: order.total,
+          })
+        },
+
+        // Called before processing payment
+        beforePayment: async (order) => {
+          // Verify fraud detection
+          await fraudCheck(order)
+        },
+
+        // Called after successful payment
+        afterPayment: async (order, paymentResult) => {
+          // Update accounting system
+          await updateAccounting(order, paymentResult)
+
+          // Trigger fulfillment workflow
+          await startFulfillment(order)
+        },
+      },
+    }),
+  ],
+})
 ```
 
 ## Testing
