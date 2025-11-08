@@ -61,6 +61,7 @@ export default buildConfig({
             consoleWarnings: true,
           },
           customUiRoute: '/test-payment',
+          baseUrl: process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000',
         }),
       ],
       collections: {
@@ -74,12 +75,20 @@ export default buildConfig({
                 ...(config.hooks?.afterChange || []),
                 // Hook to sync payment status to order
                 async ({ doc, operation, req }: any) => {
+                  console.log('[Billing Sync Hook] Called:', {
+                    operation,
+                    paymentId: doc.id,
+                    status: doc.status,
+                    hasMetadata: !!doc.metadata,
+                    orderId: doc.metadata?.orderId
+                  });
+
                   // Sync payment status to order when payment status changes
                   if ((operation === 'update' || operation === 'create') && doc.metadata?.orderId) {
                     const orderId = doc.metadata.orderId;
 
                     // Map billing plugin status to order payment status
-                    const statusMap: Record<string, string> = {
+                    const paymentStatusMap: Record<string, string> = {
                       'succeeded': 'paid',
                       'paid': 'paid',
                       'failed': 'failed',
@@ -89,7 +98,26 @@ export default buildConfig({
                       'processing': 'pending',
                     };
 
-                    const paymentStatus = statusMap[doc.status] || 'pending';
+                    // Map billing plugin status to order status
+                    const orderStatusMap: Record<string, string> = {
+                      'succeeded': 'processing',
+                      'paid': 'processing',
+                      'failed': 'cancelled',
+                      'canceled': 'cancelled',
+                      'cancelled': 'cancelled',
+                      'pending': 'pending',
+                      'processing': 'pending',
+                    };
+
+                    const paymentStatus = paymentStatusMap[doc.status] || 'pending';
+                    const orderStatus = orderStatusMap[doc.status] || 'pending';
+
+                    console.log('[Billing Sync] Updating order:', {
+                      orderId,
+                      fromPaymentStatus: doc.status,
+                      toPaymentStatus: paymentStatus,
+                      toOrderStatus: orderStatus
+                    });
 
                     try {
                       await req.payload.update({
@@ -97,12 +125,15 @@ export default buildConfig({
                         id: orderId,
                         data: {
                           paymentStatus: paymentStatus as 'pending' | 'paid' | 'failed' | 'refunded',
+                          status: orderStatus as 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded',
                         },
                       });
-                      req.payload.logger.info(`[Billing Sync] Updated order ${orderId} payment status to: ${paymentStatus}`);
+                      console.log(`[Billing Sync] ✓ Updated order ${orderId} - payment: ${paymentStatus}, status: ${orderStatus}`);
                     } catch (error) {
-                      req.payload.logger.error(`[Billing Sync] Failed to update order ${orderId}:`, error);
+                      console.error(`[Billing Sync] ✗ Failed to update order ${orderId}:`, error);
                     }
+                  } else {
+                    console.log('[Billing Sync] Skipping - conditions not met');
                   }
                 },
               ],
