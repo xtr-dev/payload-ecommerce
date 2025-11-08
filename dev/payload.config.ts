@@ -75,14 +75,6 @@ export default buildConfig({
                 ...(config.hooks?.afterChange || []),
                 // Hook to sync payment status to order
                 async ({ doc, operation, req }: any) => {
-                  console.log('[Billing Sync Hook] Called:', {
-                    operation,
-                    paymentId: doc.id,
-                    status: doc.status,
-                    hasMetadata: !!doc.metadata,
-                    orderId: doc.metadata?.orderId
-                  });
-
                   // Sync payment status to order when payment status changes
                   if ((operation === 'update' || operation === 'create') && doc.metadata?.orderId) {
                     const orderId = doc.metadata.orderId;
@@ -112,13 +104,6 @@ export default buildConfig({
                     const paymentStatus = paymentStatusMap[doc.status] || 'pending';
                     const orderStatus = orderStatusMap[doc.status] || 'pending';
 
-                    console.log('[Billing Sync] Updating order:', {
-                      orderId,
-                      fromPaymentStatus: doc.status,
-                      toPaymentStatus: paymentStatus,
-                      toOrderStatus: orderStatus
-                    });
-
                     try {
                       await req.payload.update({
                         collection: 'orders',
@@ -128,12 +113,9 @@ export default buildConfig({
                           status: orderStatus as 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded',
                         },
                       });
-                      console.log(`[Billing Sync] ✓ Updated order ${orderId} - payment: ${paymentStatus}, status: ${orderStatus}`);
                     } catch (error) {
-                      console.error(`[Billing Sync] ✗ Failed to update order ${orderId}:`, error);
+                      req.payload.logger.error(`[Billing Sync] Failed to update order ${orderId}:`, error);
                     }
-                  } else {
-                    console.log('[Billing Sync] Skipping - conditions not met');
                   }
                 },
               ],
