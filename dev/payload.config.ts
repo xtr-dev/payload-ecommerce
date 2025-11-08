@@ -1,11 +1,11 @@
-import { mongooseAdapter } from '@payloadcms/db-mongodb'
+import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
-import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import path from 'path'
 import { buildConfig } from 'payload'
 import { payloadEcommerce } from 'payload-ecommerce'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
+import { billingPlugin, testProvider } from '@xtr-dev/payload-billing'
 
 import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
@@ -17,59 +17,165 @@ if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
 
-const buildConfigWithMemoryDB = async () => {
-  if (process.env.NODE_ENV === 'test') {
-    const memoryDB = await MongoMemoryReplSet.create({
-      replSet: {
-        count: 3,
-        dbName: 'payloadmemory',
+export default buildConfig({
+  admin: {
+    importMap: {
+      baseDir: path.resolve(dirname),
+    },
+  },
+  collections: [
+    {
+      slug: 'posts',
+      fields: [],
+    },
+    {
+      slug: 'media',
+      fields: [],
+      upload: {
+        staticDir: path.resolve(dirname, 'media'),
       },
-    })
-
-    process.env.DATABASE_URI = `${memoryDB.getUri()}&retryWrites=true`
-  }
-
-  return buildConfig({
-    admin: {
-      importMap: {
-        baseDir: path.resolve(dirname),
+      access: {
+        read: () => true, // Allow public read access to media files
       },
     },
-    collections: [
-      {
-        slug: 'posts',
-        fields: [],
-      },
-      {
-        slug: 'media',
-        fields: [],
-        upload: {
-          staticDir: path.resolve(dirname, 'media'),
+  ],
+  db: sqliteAdapter({
+    client: {
+      url: process.env.DATABASE_URI || `file:${path.resolve(dirname, 'payload.db')}`,
+    },
+  }),
+  editor: lexicalEditor(),
+  email: testEmailAdapter,
+  onInit: async (payload) => {
+    await seed(payload);
+  },
+  plugins: [
+    payloadEcommerce(),
+    billingPlugin({
+      providers: [
+        testProvider({
+          enabled: true,
+          testModeIndicators: {
+            showWarningBanners: true,
+            showTestBadges: true,
+            consoleWarnings: true,
+          },
+          customUiRoute: '/test-payment',
+        }),
+      ],
+      collections: {
+        payments: {
+          slug: 'payments',
+          extend: (config: any) => ({
+            ...config,
+            hooks: {
+              ...config.hooks,
+              afterChange: [
+                ...(config.hooks?.afterChange || []),
+                // Hook to sync payment status to order
+                async ({ doc, operation, req }: any) => {
+                  // Sync payment status to order when payment status changes
+                  if ((operation === 'update' || operation === 'create') && doc.metadata?.orderId) {
+                    const orderId = doc.metadata.orderId;
+
+                    // Map billing plugin status to order payment status
+                    const statusMap: Record<string, string> = {
+                      'succeeded': 'paid',
+                      'paid': 'paid',
+                      'failed': 'failed',
+                      'canceled': 'failed',
+                      'cancelled': 'failed',
+                      'pending': 'pending',
+                      'processing': 'pending',
+                    };
+
+                    const paymentStatus = statusMap[doc.status] || 'pending';
+
+                    try {
+                      await req.payload.update({
+                        collection: 'orders',
+                        id: orderId,
+                        data: {
+                          paymentStatus: paymentStatus as 'pending' | 'paid' | 'failed' | 'refunded',
+                        },
+                      });
+                      req.payload.logger.info(`[Billing Sync] Updated order ${orderId} payment status to: ${paymentStatus}`);
+                    } catch (error) {
+                      req.payload.logger.error(`[Billing Sync] Failed to update order ${orderId}:`, error);
+                    }
+                  }
+                },
+              ],
+            },
+          }),
         },
+        invoices: {
+          slug: 'invoices',
+          // Use extend to add custom fields and hooks to the invoice collection
+          extend: (config: any) => ({
+            ...config,
+            fields: [
+              ...(config.fields || []),
+              // Add a custom field to track the associated order
+              {
+                name: 'order',
+                type: 'relationship',
+                relationTo: 'orders',
+                admin: {
+                  description: 'Associated ecommerce order',
+                },
+              },
+            ],
+            hooks: {
+              ...config.hooks,
+              beforeChange: [
+                ...(config.hooks?.beforeChange || []),
+                // Hook to auto-populate invoice from order data if order is provided
+                async ({ data, req, operation }: any) => {
+                  if (operation === 'create' && data.order) {
+                    try {
+                      const order = await req.payload.findByID({
+                        collection: 'orders',
+                        id: typeof data.order === 'object' ? data.order.id : data.order,
+                      })
+
+                      // Auto-populate customer info from order if not provided
+                      if (!data.customerInfo && order.billingAddress) {
+                        data.customerInfo = {
+                          name: `${order.billingAddress.firstName} ${order.billingAddress.lastName}`,
+                          email: order.user?.email || '',
+                          phone: order.billingAddress.phone || '',
+                        }
+                      }
+
+                      // Auto-populate billing address from order if not provided
+                      if (!data.billingAddress && order.billingAddress) {
+                        data.billingAddress = {
+                          line1: order.billingAddress.address1,
+                          line2: order.billingAddress.address2,
+                          city: order.billingAddress.city,
+                          state: order.billingAddress.state,
+                          postalCode: order.billingAddress.postalCode,
+                          country: order.billingAddress.country,
+                        }
+                      }
+                    } catch (error) {
+                      req.payload.logger.error('Failed to populate invoice from order:', error)
+                    }
+                  }
+                  return data
+                },
+              ],
+            },
+          }),
+        },
+        refunds: 'refunds',
       },
-    ],
-    db: mongooseAdapter({
-      ensureIndexes: true,
-      url: process.env.DATABASE_URI || '',
     }),
-    editor: lexicalEditor(),
-    email: testEmailAdapter,
-    onInit: async (payload) => {
-      await seed(payload)
-    },
-    plugins: [
-      payloadEcommerce({
-        collections: {
-          posts: true,
-        },
-      }),
-    ],
-    secret: process.env.PAYLOAD_SECRET || 'test-secret_key',
-    sharp,
-    typescript: {
-      outputFile: path.resolve(dirname, 'payload-types.ts'),
-    },
-  })
-}
-
-export default buildConfigWithMemoryDB()
+  ],
+  secret: process.env.PAYLOAD_SECRET || 'test-secret_key',
+  sharp,
+  typescript: {
+    outputFile: path.resolve(dirname, 'payload-types.ts'),
+  },
+})

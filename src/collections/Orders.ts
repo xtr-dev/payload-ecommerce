@@ -79,7 +79,9 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
       name: 'user',
       type: 'relationship',
       relationTo: 'users',
-      required: true,
+      admin: {
+        description: 'User who placed the order (optional for guest orders)',
+      },
     },
     {
       name: 'items',

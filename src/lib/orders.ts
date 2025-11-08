@@ -2,7 +2,42 @@ import type { Payload } from 'payload'
 
 export interface CreateOrderFromCartParams {
   cartId: string
-  shippingAddress: {
+  orderData?: {
+    shippingAddress: {
+      firstName: string
+      lastName: string
+      address1: string
+      address2?: string
+      city: string
+      state: string
+      postalCode: string
+      country: string
+      phone?: string
+    }
+    billingAddress?: {
+      firstName: string
+      lastName: string
+      address1: string
+      address2?: string
+      city: string
+      state: string
+      postalCode: string
+      country: string
+      phone?: string
+    }
+    paymentMethod?: string
+    notes?: string
+    subtotal?: number
+    tax?: number
+    shipping?: number
+    discount?: number
+    total?: number
+    coupon?: string
+    status?: string
+    paymentStatus?: string
+  }
+  // Legacy parameters for backward compatibility
+  shippingAddress?: {
     firstName: string
     lastName: string
     address1: string
@@ -41,13 +76,19 @@ export const createOrderHelpers = (
   cartsSlug = 'carts',
   productsSlug = 'products',
 ) => {
-  const createOrderFromCart = async ({
-    cartId,
-    shippingAddress,
-    billingAddress,
-    paymentMethod,
-    notes,
-  }: CreateOrderFromCartParams) => {
+  const createOrderFromCart = async (params: CreateOrderFromCartParams) => {
+    const { cartId, orderData } = params
+
+    // Support both new orderData structure and legacy parameters
+    const shippingAddress = orderData?.shippingAddress || params.shippingAddress
+    const billingAddress = orderData?.billingAddress || params.billingAddress
+    const paymentMethod = orderData?.paymentMethod || params.paymentMethod
+    const notes = orderData?.notes || params.notes
+
+    if (!shippingAddress) {
+      throw new Error('Shipping address is required')
+    }
+
     const cart = await payload.findByID({
       collection: cartsSlug,
       id: cartId,
@@ -59,7 +100,7 @@ export const createOrderHelpers = (
     }
 
     const items = []
-    let subtotal = 0
+    let calculatedSubtotal = 0
 
     for (const item of cart.items) {
       const product =
@@ -85,25 +126,35 @@ export const createOrderHelpers = (
         total,
       })
 
-      subtotal += total
+      calculatedSubtotal += total
     }
+
+    // Use provided values or fall back to calculated/default values
+    const subtotal = orderData?.subtotal ?? calculatedSubtotal
+    const tax = orderData?.tax ?? 0
+    const shipping = orderData?.shipping ?? 0
+    const discount = orderData?.discount ?? 0
+    const total = orderData?.total ?? subtotal
+    const status = orderData?.status || 'pending'
+    const paymentStatus = orderData?.paymentStatus || 'pending'
 
     const order = await payload.create({
       collection: ordersSlug,
       data: {
-        user: cart.user,
+        user: cart.user || undefined,
         items,
         subtotal,
-        tax: 0,
-        shipping: 0,
-        discount: 0,
-        total: subtotal,
+        tax,
+        shipping,
+        discount,
+        total,
         shippingAddress,
         billingAddress: billingAddress || shippingAddress,
         paymentMethod,
         notes,
-        status: 'pending',
-        paymentStatus: 'pending',
+        status,
+        paymentStatus,
+        coupon: orderData?.coupon,
       },
     })
 

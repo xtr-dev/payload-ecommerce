@@ -6,14 +6,77 @@
  * and re-run `payload generate:types` to regenerate this file.
  */
 
+/**
+ * Supported timezones in IANA format.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "supportedTimezones".
+ */
+export type SupportedTimezones =
+  | 'Pacific/Midway'
+  | 'Pacific/Niue'
+  | 'Pacific/Honolulu'
+  | 'Pacific/Rarotonga'
+  | 'America/Anchorage'
+  | 'Pacific/Gambier'
+  | 'America/Los_Angeles'
+  | 'America/Tijuana'
+  | 'America/Denver'
+  | 'America/Phoenix'
+  | 'America/Chicago'
+  | 'America/Guatemala'
+  | 'America/New_York'
+  | 'America/Bogota'
+  | 'America/Caracas'
+  | 'America/Santiago'
+  | 'America/Buenos_Aires'
+  | 'America/Sao_Paulo'
+  | 'Atlantic/South_Georgia'
+  | 'Atlantic/Azores'
+  | 'Atlantic/Cape_Verde'
+  | 'Europe/London'
+  | 'Europe/Berlin'
+  | 'Africa/Lagos'
+  | 'Europe/Athens'
+  | 'Africa/Cairo'
+  | 'Europe/Moscow'
+  | 'Asia/Riyadh'
+  | 'Asia/Dubai'
+  | 'Asia/Baku'
+  | 'Asia/Karachi'
+  | 'Asia/Tashkent'
+  | 'Asia/Calcutta'
+  | 'Asia/Dhaka'
+  | 'Asia/Almaty'
+  | 'Asia/Jakarta'
+  | 'Asia/Bangkok'
+  | 'Asia/Shanghai'
+  | 'Asia/Singapore'
+  | 'Asia/Tokyo'
+  | 'Asia/Seoul'
+  | 'Australia/Brisbane'
+  | 'Australia/Sydney'
+  | 'Pacific/Guam'
+  | 'Pacific/Noumea'
+  | 'Pacific/Auckland'
+  | 'Pacific/Fiji';
+
 export interface Config {
   auth: {
     users: UserAuthOperations;
   };
+  blocks: {};
   collections: {
     posts: Post;
     media: Media;
-    'plugin-collection': PluginCollection;
+    products: Product;
+    categories: Category;
+    orders: Order;
+    carts: Cart;
+    coupons: Coupon;
+    payments: Payment;
+    invoices: Invoice;
+    refunds: Refund;
     users: User;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -23,14 +86,21 @@ export interface Config {
   collectionsSelect: {
     posts: PostsSelect<false> | PostsSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
-    'plugin-collection': PluginCollectionSelect<false> | PluginCollectionSelect<true>;
+    products: ProductsSelect<false> | ProductsSelect<true>;
+    categories: CategoriesSelect<false> | CategoriesSelect<true>;
+    orders: OrdersSelect<false> | OrdersSelect<true>;
+    carts: CartsSelect<false> | CartsSelect<true>;
+    coupons: CouponsSelect<false> | CouponsSelect<true>;
+    payments: PaymentsSelect<false> | PaymentsSelect<true>;
+    invoices: InvoicesSelect<false> | InvoicesSelect<true>;
+    refunds: RefundsSelect<false> | RefundsSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
   };
   db: {
-    defaultIDType: string;
+    defaultIDType: number;
   };
   globals: {};
   globalsSelect: {};
@@ -66,8 +136,7 @@ export interface UserAuthOperations {
  * via the `definition` "posts".
  */
 export interface Post {
-  id: string;
-  addedByPlugin?: string | null;
+  id: number;
   updatedAt: string;
   createdAt: string;
 }
@@ -76,7 +145,7 @@ export interface Post {
  * via the `definition` "media".
  */
 export interface Media {
-  id: string;
+  id: number;
   updatedAt: string;
   createdAt: string;
   url?: string | null;
@@ -91,10 +160,139 @@ export interface Media {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "plugin-collection".
+ * via the `definition` "products".
  */
-export interface PluginCollection {
-  id: string;
+export interface Product {
+  id: number;
+  title: string;
+  slug?: string | null;
+  description?: {
+    root: {
+      type: string;
+      children: {
+        type: string;
+        version: number;
+        [k: string]: unknown;
+      }[];
+      direction: ('ltr' | 'rtl') | null;
+      format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+      indent: number;
+      version: number;
+    };
+    [k: string]: unknown;
+  } | null;
+  price: number;
+  /**
+   * Original price for showing discounts
+   */
+  compareAtPrice?: number | null;
+  /**
+   * Stock keeping unit
+   */
+  sku?: string | null;
+  barcode?: string | null;
+  inventory?: {
+    trackQuantity?: boolean | null;
+    quantity?: number | null;
+    /**
+     * Alert threshold for low stock
+     */
+    lowStockThreshold?: number | null;
+  };
+  images?: (number | Media)[] | null;
+  categories?: (number | Category)[] | null;
+  variants?:
+    | {
+        name: string;
+        sku?: string | null;
+        /**
+         * Price override for this variant
+         */
+        price?: number | null;
+        inventory?: number | null;
+        id?: string | null;
+      }[]
+    | null;
+  status: 'draft' | 'active' | 'archived';
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "categories".
+ */
+export interface Category {
+  id: number;
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  /**
+   * Parent category for nesting
+   */
+  parent?: (number | null) | Category;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "orders".
+ */
+export interface Order {
+  id: number;
+  orderNumber?: string | null;
+  /**
+   * User who placed the order (optional for guest orders)
+   */
+  user?: (number | null) | User;
+  items: {
+    product: number | Product;
+    variant?: string | null;
+    quantity: number;
+    /**
+     * Price at time of purchase
+     */
+    price: number;
+    total: number;
+    id?: string | null;
+  }[];
+  subtotal: number;
+  tax?: number | null;
+  shipping?: number | null;
+  discount?: number | null;
+  total: number;
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
+  paymentMethod?: string | null;
+  /**
+   * Payment gateway transaction ID
+   */
+  paymentId?: string | null;
+  shippingAddress: {
+    firstName: string;
+    lastName: string;
+    address1: string;
+    address2?: string | null;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+    phone?: string | null;
+  };
+  billingAddress: {
+    firstName: string;
+    lastName: string;
+    address1: string;
+    address2?: string | null;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+    phone?: string | null;
+  };
+  notes?: string | null;
+  coupon?: (number | null) | Coupon;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -103,7 +301,7 @@ export interface PluginCollection {
  * via the `definition` "users".
  */
 export interface User {
-  id: string;
+  id: number;
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -117,31 +315,374 @@ export interface User {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "coupons".
+ */
+export interface Coupon {
+  id: number;
+  code: string;
+  /**
+   * Internal description
+   */
+  description?: string | null;
+  type: 'percentage' | 'fixed' | 'freeShipping';
+  /**
+   * Discount value (percentage or fixed amount)
+   */
+  value?: number | null;
+  /**
+   * Minimum order amount required
+   */
+  minPurchase?: number | null;
+  /**
+   * Maximum discount cap
+   */
+  maxDiscount?: number | null;
+  /**
+   * Total usage limit (0 = unlimited)
+   */
+  usageLimit?: number | null;
+  /**
+   * Current usage count
+   */
+  usageCount?: number | null;
+  /**
+   * Per-customer usage limit (0 = unlimited)
+   */
+  customerLimit?: number | null;
+  /**
+   * Start date
+   */
+  validFrom?: string | null;
+  /**
+   * End date
+   */
+  validUntil?: string | null;
+  status: 'active' | 'inactive' | 'expired';
+  /**
+   * Specific products this coupon applies to (empty = all products)
+   */
+  appliesToProducts?: (number | Product)[] | null;
+  /**
+   * Specific categories this coupon applies to (empty = all categories)
+   */
+  appliesToCategories?: (number | Category)[] | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "carts".
+ */
+export interface Cart {
+  id: number;
+  /**
+   * Logged-in user (optional)
+   */
+  user?: (number | null) | User;
+  /**
+   * Session ID for guest users
+   */
+  sessionId?: string | null;
+  items?:
+    | {
+        product: number | Product;
+        variant?: string | null;
+        quantity: number;
+        id?: string | null;
+      }[]
+    | null;
+  /**
+   * Auto-calculated
+   */
+  subtotal?: number | null;
+  /**
+   * Cart expiration date
+   */
+  expiresAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payments".
+ */
+export interface Payment {
+  id: number;
+  provider: 'stripe' | 'mollie' | 'test';
+  /**
+   * The payment ID from the payment provider
+   */
+  providerId?: string | null;
+  status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'canceled' | 'refunded' | 'partially_refunded';
+  /**
+   * Amount in cents (e.g., 2000 = $20.00)
+   */
+  amount: number;
+  /**
+   * ISO 4217 currency code (e.g., USD, EUR)
+   */
+  currency: string;
+  /**
+   * Payment description
+   */
+  description?: string | null;
+  invoice?: (number | null) | Invoice;
+  /**
+   * Additional metadata for the payment
+   */
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Raw data from the payment provider
+   */
+  providerData?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  refunds?: (number | Refund)[] | null;
+  version?: number | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoices".
+ */
+export interface Invoice {
+  id: number;
+  /**
+   * Invoice number (e.g., INV-001)
+   */
+  number: string;
+  /**
+   * Customer billing information
+   */
+  customerInfo: {
+    /**
+     * Customer name
+     */
+    name: string;
+    /**
+     * Customer email address
+     */
+    email: string;
+    /**
+     * Customer phone number
+     */
+    phone?: string | null;
+    /**
+     * Company name (optional)
+     */
+    company?: string | null;
+    /**
+     * Tax ID or VAT number
+     */
+    taxId?: string | null;
+  };
+  /**
+   * Billing address
+   */
+  billingAddress: {
+    /**
+     * Address line 1
+     */
+    line1: string;
+    /**
+     * Address line 2
+     */
+    line2?: string | null;
+    city: string;
+    /**
+     * State or province
+     */
+    state?: string | null;
+    /**
+     * Postal or ZIP code
+     */
+    postalCode: string;
+    /**
+     * Country code (e.g., US, GB)
+     */
+    country: string;
+  };
+  status: 'draft' | 'open' | 'paid' | 'void' | 'uncollectible';
+  /**
+   * ISO 4217 currency code (e.g., USD, EUR)
+   */
+  currency: string;
+  items: {
+    description: string;
+    quantity: number;
+    /**
+     * Amount in cents
+     */
+    unitAmount: number;
+    /**
+     * Calculated: quantity × unitAmount
+     */
+    totalAmount?: number | null;
+    id?: string | null;
+  }[];
+  /**
+   * Sum of all line items
+   */
+  subtotal?: number | null;
+  /**
+   * Tax amount in cents
+   */
+  taxAmount?: number | null;
+  /**
+   * Total amount (subtotal + tax)
+   */
+  amount?: number | null;
+  dueDate?: string | null;
+  paidAt?: string | null;
+  payment?: (number | null) | Payment;
+  /**
+   * Internal notes
+   */
+  notes?: string | null;
+  /**
+   * Additional invoice metadata
+   */
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Associated ecommerce order
+   */
+  order?: (number | null) | Order;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "refunds".
+ */
+export interface Refund {
+  id: number;
+  /**
+   * The refund ID from the payment provider
+   */
+  providerId: string;
+  payment: number | Payment;
+  status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'canceled';
+  /**
+   * Refund amount in cents
+   */
+  amount: number;
+  /**
+   * ISO 4217 currency code (e.g., USD, EUR)
+   */
+  currency: string;
+  /**
+   * Reason for the refund
+   */
+  reason?: ('duplicate' | 'fraudulent' | 'requested_by_customer' | 'other') | null;
+  /**
+   * Additional details about the refund
+   */
+  description?: string | null;
+  /**
+   * Additional refund metadata
+   */
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Raw data from the payment provider
+   */
+  providerData?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-locked-documents".
  */
 export interface PayloadLockedDocument {
-  id: string;
+  id: number;
   document?:
     | ({
         relationTo: 'posts';
-        value: string | Post;
+        value: number | Post;
       } | null)
     | ({
         relationTo: 'media';
-        value: string | Media;
+        value: number | Media;
       } | null)
     | ({
-        relationTo: 'plugin-collection';
-        value: string | PluginCollection;
+        relationTo: 'products';
+        value: number | Product;
+      } | null)
+    | ({
+        relationTo: 'categories';
+        value: number | Category;
+      } | null)
+    | ({
+        relationTo: 'orders';
+        value: number | Order;
+      } | null)
+    | ({
+        relationTo: 'carts';
+        value: number | Cart;
+      } | null)
+    | ({
+        relationTo: 'coupons';
+        value: number | Coupon;
+      } | null)
+    | ({
+        relationTo: 'payments';
+        value: number | Payment;
+      } | null)
+    | ({
+        relationTo: 'invoices';
+        value: number | Invoice;
+      } | null)
+    | ({
+        relationTo: 'refunds';
+        value: number | Refund;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   globalSlug?: string | null;
   user: {
     relationTo: 'users';
-    value: string | User;
+    value: number | User;
   };
   updatedAt: string;
   createdAt: string;
@@ -151,10 +692,10 @@ export interface PayloadLockedDocument {
  * via the `definition` "payload-preferences".
  */
 export interface PayloadPreference {
-  id: string;
+  id: number;
   user: {
     relationTo: 'users';
-    value: string | User;
+    value: number | User;
   };
   key?: string | null;
   value?:
@@ -174,7 +715,7 @@ export interface PayloadPreference {
  * via the `definition` "payload-migrations".
  */
 export interface PayloadMigration {
-  id: string;
+  id: number;
   name?: string | null;
   batch?: number | null;
   updatedAt: string;
@@ -185,7 +726,6 @@ export interface PayloadMigration {
  * via the `definition` "posts_select".
  */
 export interface PostsSelect<T extends boolean = true> {
-  addedByPlugin?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -208,10 +748,232 @@ export interface MediaSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "plugin-collection_select".
+ * via the `definition` "products_select".
  */
-export interface PluginCollectionSelect<T extends boolean = true> {
-  id?: T;
+export interface ProductsSelect<T extends boolean = true> {
+  title?: T;
+  slug?: T;
+  description?: T;
+  price?: T;
+  compareAtPrice?: T;
+  sku?: T;
+  barcode?: T;
+  inventory?:
+    | T
+    | {
+        trackQuantity?: T;
+        quantity?: T;
+        lowStockThreshold?: T;
+      };
+  images?: T;
+  categories?: T;
+  variants?:
+    | T
+    | {
+        name?: T;
+        sku?: T;
+        price?: T;
+        inventory?: T;
+        id?: T;
+      };
+  status?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "categories_select".
+ */
+export interface CategoriesSelect<T extends boolean = true> {
+  name?: T;
+  slug?: T;
+  description?: T;
+  parent?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "orders_select".
+ */
+export interface OrdersSelect<T extends boolean = true> {
+  orderNumber?: T;
+  user?: T;
+  items?:
+    | T
+    | {
+        product?: T;
+        variant?: T;
+        quantity?: T;
+        price?: T;
+        total?: T;
+        id?: T;
+      };
+  subtotal?: T;
+  tax?: T;
+  shipping?: T;
+  discount?: T;
+  total?: T;
+  status?: T;
+  paymentStatus?: T;
+  paymentMethod?: T;
+  paymentId?: T;
+  shippingAddress?:
+    | T
+    | {
+        firstName?: T;
+        lastName?: T;
+        address1?: T;
+        address2?: T;
+        city?: T;
+        state?: T;
+        postalCode?: T;
+        country?: T;
+        phone?: T;
+      };
+  billingAddress?:
+    | T
+    | {
+        firstName?: T;
+        lastName?: T;
+        address1?: T;
+        address2?: T;
+        city?: T;
+        state?: T;
+        postalCode?: T;
+        country?: T;
+        phone?: T;
+      };
+  notes?: T;
+  coupon?: T;
+  trackingNumber?: T;
+  trackingUrl?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "carts_select".
+ */
+export interface CartsSelect<T extends boolean = true> {
+  user?: T;
+  sessionId?: T;
+  items?:
+    | T
+    | {
+        product?: T;
+        variant?: T;
+        quantity?: T;
+        id?: T;
+      };
+  subtotal?: T;
+  expiresAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "coupons_select".
+ */
+export interface CouponsSelect<T extends boolean = true> {
+  code?: T;
+  description?: T;
+  type?: T;
+  value?: T;
+  minPurchase?: T;
+  maxDiscount?: T;
+  usageLimit?: T;
+  usageCount?: T;
+  customerLimit?: T;
+  validFrom?: T;
+  validUntil?: T;
+  status?: T;
+  appliesToProducts?: T;
+  appliesToCategories?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payments_select".
+ */
+export interface PaymentsSelect<T extends boolean = true> {
+  provider?: T;
+  providerId?: T;
+  status?: T;
+  amount?: T;
+  currency?: T;
+  description?: T;
+  invoice?: T;
+  metadata?: T;
+  providerData?: T;
+  refunds?: T;
+  version?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "invoices_select".
+ */
+export interface InvoicesSelect<T extends boolean = true> {
+  number?: T;
+  customerInfo?:
+    | T
+    | {
+        name?: T;
+        email?: T;
+        phone?: T;
+        company?: T;
+        taxId?: T;
+      };
+  billingAddress?:
+    | T
+    | {
+        line1?: T;
+        line2?: T;
+        city?: T;
+        state?: T;
+        postalCode?: T;
+        country?: T;
+      };
+  status?: T;
+  currency?: T;
+  items?:
+    | T
+    | {
+        description?: T;
+        quantity?: T;
+        unitAmount?: T;
+        totalAmount?: T;
+        id?: T;
+      };
+  subtotal?: T;
+  taxAmount?: T;
+  amount?: T;
+  dueDate?: T;
+  paidAt?: T;
+  payment?: T;
+  notes?: T;
+  metadata?: T;
+  order?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "refunds_select".
+ */
+export interface RefundsSelect<T extends boolean = true> {
+  providerId?: T;
+  payment?: T;
+  status?: T;
+  amount?: T;
+  currency?: T;
+  reason?: T;
+  description?: T;
+  metadata?: T;
+  providerData?: T;
   updatedAt?: T;
   createdAt?: T;
 }

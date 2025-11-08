@@ -19,6 +19,9 @@
       "@payload-config": [
         "./payload.config.ts"
       ],
+      "@/*": [
+        "./*"
+      ],
       "payload-ecommerce": [
         "../src/index.ts"
       ],
