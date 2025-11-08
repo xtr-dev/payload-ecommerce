@@ -31,6 +31,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
       },
     },
     limit: 1,
+    depth: 2,
   });
 
   if (docs.length === 0) {
@@ -157,46 +158,14 @@ export default async function ProductDetailPage({ params }: PageProps) {
             </div>
           )}
 
-          {/* Variants */}
-          {product.variants && product.variants.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Available Variants</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {product.variants.map((variant: any, index: number) => {
-                  const variantPrice = variant.price || product.price;
-                  const variantQuantity = variant.quantity ?? quantity;
-                  const variantOutOfStock = trackQuantity && variantQuantity === 0;
-
-                  return (
-                    <div
-                      key={index}
-                      className={`border rounded-md p-3 ${
-                        variantOutOfStock
-                          ? 'border-gray-200 bg-gray-50'
-                          : 'border-gray-300 hover:border-blue-500 cursor-pointer'
-                      }`}
-                    >
-                      <div className="font-medium text-sm text-gray-900">{variant.name}</div>
-                      {variant.price && (
-                        <div className="text-sm text-gray-600 mt-1">
-                          ${variantPrice.toFixed(2)}
-                        </div>
-                      )}
-                      {variantOutOfStock && (
-                        <div className="text-xs text-red-600 mt-1">Out of Stock</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* Quantity Selector and Add to Cart */}
           <AddToCartForm
             productId={product.id}
             isOutOfStock={isOutOfStock}
             maxQuantity={trackQuantity ? quantity : 10}
+            variants={product.variants as any[]}
+            trackQuantity={trackQuantity}
+            basePrice={product.price}
           />
 
           {/* Additional Info */}

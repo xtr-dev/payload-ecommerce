@@ -191,6 +191,23 @@ export default function CartPage() {
               {cart.items.map((item, index) => {
                 const imageUrl = item.product.images?.[0]?.url || '/placeholder-product.jpg';
 
+                // Find variant name from product variants if variant SKU is stored
+                let variantName = item.variant;
+                console.log('Cart item:', {
+                  title: item.product.title,
+                  variant: item.variant,
+                  hasVariants: !!(item.product as any).variants,
+                  variantsCount: (item.product as any).variants?.length,
+                });
+                if (item.variant && (item.product as any).variants) {
+                  const matchedVariant = (item.product as any).variants.find(
+                    (v: any) => v.sku === item.variant || v.name === item.variant
+                  );
+                  if (matchedVariant) {
+                    variantName = matchedVariant.name;
+                  }
+                }
+
                 return (
                   <div key={index} className="py-6 flex gap-6">
                     {/* Product Image */}
@@ -209,8 +226,10 @@ export default function CartPage() {
                           {item.product.title}
                         </h3>
                       </Link>
-                      {item.variant && (
-                        <p className="text-sm text-gray-600 mb-2">Variant: {item.variant}</p>
+                      {variantName && (
+                        <p className="text-sm text-gray-600 mb-2">
+                          <span className="font-medium">Variant:</span> {variantName}
+                        </p>
                       )}
                       <p className="text-lg font-semibold text-gray-900">
                         {formatPrice(item.product.price)}
