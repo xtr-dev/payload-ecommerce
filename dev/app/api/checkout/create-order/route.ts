@@ -83,11 +83,11 @@ export async function POST(request: Request) {
       }
     }
 
-    // Calculate other costs (demo values)
-    const tax = Math.round((subtotal - discount) * 0.1 * 100) / 100; // 10% tax
+    // Calculate shipping cost (demo value)
     const shipping = subtotal >= 100 ? 0 : 10; // Free shipping over $100
-    const total = subtotal - discount + tax + shipping;
 
+    // Note: Tax is automatically calculated by the plugin's calculateTax hook (if configured)
+    // Total is also automatically calculated in the beforeChange hook
     // Create order first (before payment)
     const order = await ecommerce.orders.createOrderFromCart({
       cartId: cart.id,
@@ -97,18 +97,16 @@ export async function POST(request: Request) {
         paymentMethod: paymentMethod || 'credit_card',
         paymentStatus: 'pending',
         subtotal,
-        tax,
         shipping,
         discount,
-        total,
         coupon: discountCouponId,
         status: 'pending',
       },
     });
 
     // Create a payment using the billing plugin (test provider)
-    // Amount should be in cents
-    const amountInCents = Math.round(total * 100);
+    // Amount should be in cents (use order total which includes calculated tax)
+    const amountInCents = Math.round(order.total * 100);
     const baseUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000';
     const returnUrl = `${baseUrl}/orders/${order.id}/confirmation`;
 

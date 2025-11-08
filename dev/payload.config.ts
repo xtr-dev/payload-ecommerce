@@ -50,7 +50,22 @@ export default buildConfig({
     await seed(payload);
   },
   plugins: [
-    payloadEcommerce(),
+    payloadEcommerce({
+      hooks: {
+        // Example tax calculation hook - calculates 10% tax on taxable amount
+        calculateTax: async (orderData) => {
+          // You can implement complex logic here based on:
+          // - Shipping address (state/country)
+          // - Product tax categories
+          // - Integration with tax services (Stripe Tax, Avalara, etc.)
+
+          const taxableAmount = orderData.subtotal - orderData.discount;
+          const taxRate = 0.10; // 10% tax rate
+
+          return Math.round(taxableAmount * taxRate * 100) / 100;
+        },
+      },
+    }),
     billingPlugin({
       providers: [
         testProvider({

@@ -274,6 +274,27 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
             data.orderNumber = `ORD-${timestamp}-${random}`
           }
 
+          // Calculate tax if hook is provided
+          if ((operation === 'create' || operation === 'update') && config.hooks?.calculateTax) {
+            try {
+              const taxAmount = await config.hooks.calculateTax({
+                items: data.items || [],
+                subtotal: data.subtotal || 0,
+                discount: data.discount || 0,
+                shipping: data.shipping || 0,
+                shippingAddress: data.shippingAddress,
+                billingAddress: data.billingAddress,
+              })
+              data.tax = taxAmount
+
+              // Recalculate total
+              data.total = (data.subtotal || 0) - (data.discount || 0) + (data.tax || 0) + (data.shipping || 0)
+            } catch (error) {
+              req.payload.logger.error(`Failed to calculate tax: ${error}`)
+              // Continue without tax calculation if it fails
+            }
+          }
+
           if (operation === 'create' && config.hooks?.beforeCreateOrder) {
             data = await config.hooks.beforeCreateOrder(data)
           }

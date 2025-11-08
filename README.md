@@ -14,6 +14,7 @@
 - 📦 **Orders** - Complete order lifecycle with status tracking
 - 🏷️ **Coupons** - Percentage, fixed amount, and free shipping discounts
 - 📊 **Inventory** - Automatic stock deduction on purchase
+- 💰 **Tax Calculation** - Configurable tax hook with support for tax services
 - 🔧 **Utilities** - Server-side helpers for cart and order management
 
 ## Quick Start
@@ -152,6 +153,55 @@ payloadEcommerce({
     }),
   },
 })
+```
+
+## Tax Configuration
+
+Configure automatic tax calculation using the `calculateTax` hook:
+
+```typescript
+payloadEcommerce({
+  hooks: {
+    calculateTax: async (orderData) => {
+      // Access order information
+      const { items, subtotal, discount, shipping, shippingAddress, billingAddress } = orderData
+
+      // Implement your tax logic
+      const taxableAmount = subtotal - discount
+      const taxRate = 0.10 // 10%
+
+      return Math.round(taxableAmount * taxRate * 100) / 100
+    },
+  },
+})
+```
+
+The hook receives:
+- `items` - Array of order items with product, quantity, and price
+- `subtotal` - Order subtotal before tax/shipping
+- `discount` - Discount amount (from coupons)
+- `shipping` - Shipping cost
+- `shippingAddress` - Customer shipping address
+- `billingAddress` - Customer billing address
+
+**Examples:**
+
+```typescript
+// Simple fixed rate
+calculateTax: async ({ subtotal, discount }) => {
+  return (subtotal - discount) * 0.08875 // 8.875% NY tax
+}
+
+// Rate by state
+calculateTax: async ({ subtotal, discount, shippingAddress }) => {
+  const rates = {
+    'CA': 0.0725,
+    'NY': 0.08875,
+    'TX': 0.0625,
+  }
+  const rate = rates[shippingAddress?.state] || 0
+  return (subtotal - discount) * rate
+}
 ```
 
 ## Inventory Tracking

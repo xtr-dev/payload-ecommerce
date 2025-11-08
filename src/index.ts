@@ -49,6 +49,20 @@ export type PayloadEcommerceConfig = {
     afterCreateOrder?: (order: any) => Promise<void>
     beforePayment?: (order: any) => Promise<void>
     afterPayment?: (order: any) => Promise<void>
+    calculateTax?: (orderData: {
+      items: Array<{
+        product: any
+        variant?: string
+        quantity: number
+        price: number
+        total: number
+      }>
+      subtotal: number
+      discount: number
+      shipping: number
+      shippingAddress?: any
+      billingAddress?: any
+    }) => Promise<number> | number
   }
 
   disabled?: boolean
