@@ -1,7 +1,7 @@
 import type { CollectionConfig } from 'payload'
-import type { PayloadEcommerceConfig } from '../index.js'
-import { createProductHelpers } from '../lib/products.js'
-import { createCouponHelpers } from '../lib/coupons.js'
+import type { PayloadEcommerceConfig } from '../index'
+import { createProductHelpers } from '../lib/products'
+import { createCouponHelpers } from '../lib/coupons'
 
 const addressFields = [
   {

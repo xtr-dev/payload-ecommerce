@@ -1,8 +1,8 @@
 import type { Payload } from 'payload'
-import { createCartHelpers } from './cart.js'
-import { createOrderHelpers } from './orders.js'
-import { createCouponHelpers } from './coupons.js'
-import { createProductHelpers } from './products.js'
+import { createCartHelpers } from './cart'
+import { createOrderHelpers } from './orders'
+import { createCouponHelpers } from './coupons'
+import { createProductHelpers } from './products'
 
 export interface EcommerceSlugs {
   products?: string

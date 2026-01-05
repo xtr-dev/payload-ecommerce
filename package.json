@@ -1,8 +1,17 @@
 {
-  "name": "payload-ecommerce",
+  "name": "@xtr-dev/payload-ecommerce",
   "version": "0.0.1",
-  "description": "A blank template to get started with Payload 3.0",
+  "description": "PayloadCMS plugin for e-commerce functionality - products, orders, carts, and checkout",
   "license": "MIT",
+  "author": "XTR Development <dev@xtr.dev>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xtr-dev/payload-ecommerce.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xtr-dev/payload-ecommerce/issues"
+  },
+  "homepage": "https://github.com/xtr-dev/payload-ecommerce#readme",
   "type": "module",
   "exports": {
     ".": {
@@ -110,7 +119,8 @@
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
+    "types": "./dist/index.d.ts",
+    "access": "public"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
