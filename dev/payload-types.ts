@@ -67,6 +67,7 @@ export interface Config {
   };
   blocks: {};
   collections: {
+    users: User;
     posts: Post;
     media: Media;
     products: Product;
@@ -77,13 +78,15 @@ export interface Config {
     payments: Payment;
     invoices: Invoice;
     refunds: Refund;
-    users: User;
+    'payload-kv': PayloadKv;
+    'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
     'payload-migrations': PayloadMigration;
   };
   collectionsJoins: {};
   collectionsSelect: {
+    users: UsersSelect<false> | UsersSelect<true>;
     posts: PostsSelect<false> | PostsSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
     products: ProductsSelect<false> | ProductsSelect<true>;
@@ -94,7 +97,8 @@ export interface Config {
     payments: PaymentsSelect<false> | PaymentsSelect<true>;
     invoices: InvoicesSelect<false> | InvoicesSelect<true>;
     refunds: RefundsSelect<false> | RefundsSelect<true>;
-    users: UsersSelect<false> | UsersSelect<true>;
+    'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
+    'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
@@ -102,14 +106,22 @@ export interface Config {
   db: {
     defaultIDType: number;
   };
+  fallbackLocale: null;
   globals: {};
   globalsSelect: {};
   locale: null;
-  user: User & {
-    collection: 'users';
+  widgets: {
+    collections: CollectionsWidget;
   };
+  user: User;
   jobs: {
-    tasks: unknown;
+    tasks: {
+      'ecommerce-delete-expired-carts': TaskEcommerceDeleteExpiredCarts;
+      inline: {
+        input: unknown;
+        output: unknown;
+      };
+    };
     workflows: unknown;
   };
 }
@@ -130,6 +142,33 @@ export interface UserAuthOperations {
     email: string;
     password: string;
   };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "users".
+ */
+export interface User {
+  id: number;
+  role: 'admin' | 'customer';
+  updatedAt: string;
+  createdAt: string;
+  email: string;
+  resetPasswordToken?: string | null;
+  resetPasswordExpiration?: string | null;
+  salt?: string | null;
+  hash?: string | null;
+  resetPasswordRequestedAt?: string | null;
+  loginAttempts?: number | null;
+  lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
+  password?: string | null;
+  collection: 'users';
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -165,12 +204,15 @@ export interface Media {
 export interface Product {
   id: number;
   title: string;
+  /**
+   * Leave empty to generate it from the title. Must be unique.
+   */
   slug?: string | null;
   description?: {
     root: {
       type: string;
       children: {
-        type: string;
+        type: any;
         version: number;
         [k: string]: unknown;
       }[];
@@ -224,6 +266,9 @@ export interface Product {
 export interface Category {
   id: number;
   name: string;
+  /**
+   * Leave empty to generate it from the name. Must be unique.
+   */
   slug?: string | null;
   description?: string | null;
   /**
@@ -244,6 +289,10 @@ export interface Order {
    * User who placed the order (optional for guest orders)
    */
   user?: (number | null) | User;
+  /**
+   * Where to reach the customer about this order. Needed for a guest order, which has no user.
+   */
+  customerEmail?: string | null;
   items: {
     product: number | Product;
     variant?: string | null;
@@ -259,6 +308,9 @@ export interface Order {
   tax?: number | null;
   shipping?: number | null;
   discount?: number | null;
+  /**
+   * Calculated on save: subtotal − discount + tax + shipping
+   */
   total: number;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
   paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
@@ -273,24 +325,38 @@ export interface Order {
     address1: string;
     address2?: string | null;
     city: string;
-    state: string;
-    postalCode: string;
+    state?: string | null;
+    postalCode?: string | null;
     country: string;
     phone?: string | null;
   };
-  billingAddress: {
-    firstName: string;
-    lastName: string;
-    address1: string;
+  /**
+   * Optional. createOrderFromCart copies the shipping address when none is given.
+   */
+  billingAddress?: {
+    firstName?: string | null;
+    lastName?: string | null;
+    address1?: string | null;
     address2?: string | null;
-    city: string;
-    state: string;
-    postalCode: string;
-    country: string;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
     phone?: string | null;
   };
   notes?: string | null;
+  /**
+   * On a new order the coupon is validated and sets the discount (or zeroes shipping for a free shipping coupon). Changing it later does not recalculate the order.
+   */
   coupon?: (number | null) | Coupon;
+  /**
+   * Set by the plugin while this order holds stock. Cleared when the stock is put back on cancellation or refund.
+   */
+  inventoryReduced?: boolean | null;
+  /**
+   * Set by the plugin while this order counts as a use of its coupon. Cleared on cancellation or refund.
+   */
+  couponUsageCounted?: boolean | null;
   trackingNumber?: string | null;
   trackingUrl?: string | null;
   updatedAt: string;
@@ -298,27 +364,13 @@ export interface Order {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "users".
- */
-export interface User {
-  id: number;
-  updatedAt: string;
-  createdAt: string;
-  email: string;
-  resetPasswordToken?: string | null;
-  resetPasswordExpiration?: string | null;
-  salt?: string | null;
-  hash?: string | null;
-  loginAttempts?: number | null;
-  lockUntil?: string | null;
-  password?: string | null;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "coupons".
  */
 export interface Coupon {
   id: number;
+  /**
+   * Stored in upper case; customers can enter it in any case
+   */
   code: string;
   /**
    * Internal description
@@ -326,7 +378,7 @@ export interface Coupon {
   description?: string | null;
   type: 'percentage' | 'fixed' | 'freeShipping';
   /**
-   * Discount value (percentage or fixed amount)
+   * Discount value (percentage or fixed amount). Not used for free shipping.
    */
   value?: number | null;
   /**
@@ -342,7 +394,7 @@ export interface Coupon {
    */
   usageLimit?: number | null;
   /**
-   * Current usage count
+   * Orders that currently use this coupon. Counted when an order is created and given back when it is cancelled or refunded.
    */
   usageCount?: number | null;
   /**
@@ -396,7 +448,7 @@ export interface Cart {
    */
   subtotal?: number | null;
   /**
-   * Cart expiration date
+   * Set to 30 days after the cart was last changed. The cart helpers ignore a cart past this date.
    */
   expiresAt?: string | null;
   updatedAt: string;
@@ -426,6 +478,18 @@ export interface Payment {
    * Payment description
    */
   description?: string | null;
+  /**
+   * Checkout URL where user can complete payment (if applicable)
+   */
+  checkoutUrl?: string | null;
+  /**
+   * URL to redirect user after payment completion. {returnToken} is replaced with this payment's return token.
+   */
+  redirectUrl?: string | null;
+  /**
+   * Random token set by the plugin on create. Put {returnToken} in the redirect URL to get it back on your return page, then find the payment by it.
+   */
+  returnToken?: string | null;
   invoice?: (number | null) | Invoice;
   /**
    * Additional metadata for the payment
@@ -463,9 +527,9 @@ export interface Payment {
 export interface Invoice {
   id: number;
   /**
-   * Invoice number (e.g., INV-001)
+   * Invoice number (auto-generated as INV-<unix-ms-timestamp>, e.g. INV-1755289904123, unless set explicitly)
    */
-  number: string;
+  number?: string | null;
   /**
    * Customer billing information
    */
@@ -580,9 +644,21 @@ export interface Invoice {
 export interface Refund {
   id: number;
   /**
-   * The refund ID from the payment provider
+   * The refund ID from the payment provider. Filled in when the provider accepts the refund; supply it to record a refund made elsewhere.
    */
-  providerId: string;
+  providerId?: string | null;
+  /**
+   * Keep this refund as a record only: it is never sent to the payment provider or polled. Use it for refunds handled by hand, or to hold one back; untick it to let the refund sweep send it.
+   */
+  manual?: boolean | null;
+  /**
+   * Sent to the provider so retrying this refund can never pay out twice
+   */
+  idempotencyKey?: string | null;
+  /**
+   * Why the provider failed or canceled the refund
+   */
+  failureReason?: string | null;
   payment: number | Payment;
   status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'canceled';
   /**
@@ -630,11 +706,124 @@ export interface Refund {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-kv".
+ */
+export interface PayloadKv {
+  id: number;
+  key: string;
+  data:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs".
+ */
+export interface PayloadJob {
+  id: number;
+  /**
+   * Input data provided to the job
+   */
+  input?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  taskStatus?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  completedAt?: string | null;
+  totalTried?: number | null;
+  /**
+   * If hasError is true this job will not be retried
+   */
+  hasError?: boolean | null;
+  /**
+   * If hasError is true, this is the error that caused it
+   */
+  error?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Task execution log
+   */
+  log?:
+    | {
+        executedAt: string;
+        completedAt: string;
+        taskSlug: 'inline' | 'ecommerce-delete-expired-carts';
+        taskID: string;
+        input?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        output?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        state: 'failed' | 'succeeded';
+        error?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        id?: string | null;
+      }[]
+    | null;
+  taskSlug?: ('inline' | 'ecommerce-delete-expired-carts') | null;
+  queue?: string | null;
+  waitUntil?: string | null;
+  processing?: boolean | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-locked-documents".
  */
 export interface PayloadLockedDocument {
   id: number;
   document?:
+    | ({
+        relationTo: 'users';
+        value: number | User;
+      } | null)
     | ({
         relationTo: 'posts';
         value: number | Post;
@@ -674,10 +863,6 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'refunds';
         value: number | Refund;
-      } | null)
-    | ({
-        relationTo: 'users';
-        value: number | User;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -720,6 +905,30 @@ export interface PayloadMigration {
   batch?: number | null;
   updatedAt: string;
   createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "users_select".
+ */
+export interface UsersSelect<T extends boolean = true> {
+  role?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  email?: T;
+  resetPasswordToken?: T;
+  resetPasswordExpiration?: T;
+  salt?: T;
+  hash?: T;
+  resetPasswordRequestedAt?: T;
+  loginAttempts?: T;
+  lockUntil?: T;
+  sessions?:
+    | T
+    | {
+        id?: T;
+        createdAt?: T;
+        expiresAt?: T;
+      };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -799,6 +1008,7 @@ export interface CategoriesSelect<T extends boolean = true> {
 export interface OrdersSelect<T extends boolean = true> {
   orderNumber?: T;
   user?: T;
+  customerEmail?: T;
   items?:
     | T
     | {
@@ -846,6 +1056,8 @@ export interface OrdersSelect<T extends boolean = true> {
       };
   notes?: T;
   coupon?: T;
+  inventoryReduced?: T;
+  couponUsageCounted?: T;
   trackingNumber?: T;
   trackingUrl?: T;
   updatedAt?: T;
@@ -904,6 +1116,9 @@ export interface PaymentsSelect<T extends boolean = true> {
   amount?: T;
   currency?: T;
   description?: T;
+  checkoutUrl?: T;
+  redirectUrl?: T;
+  returnToken?: T;
   invoice?: T;
   metadata?: T;
   providerData?: T;
@@ -966,6 +1181,9 @@ export interface InvoicesSelect<T extends boolean = true> {
  */
 export interface RefundsSelect<T extends boolean = true> {
   providerId?: T;
+  manual?: T;
+  idempotencyKey?: T;
+  failureReason?: T;
   payment?: T;
   status?: T;
   amount?: T;
@@ -979,18 +1197,42 @@ export interface RefundsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "users_select".
+ * via the `definition` "payload-kv_select".
  */
-export interface UsersSelect<T extends boolean = true> {
+export interface PayloadKvSelect<T extends boolean = true> {
+  key?: T;
+  data?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs_select".
+ */
+export interface PayloadJobsSelect<T extends boolean = true> {
+  input?: T;
+  taskStatus?: T;
+  completedAt?: T;
+  totalTried?: T;
+  hasError?: T;
+  error?: T;
+  log?:
+    | T
+    | {
+        executedAt?: T;
+        completedAt?: T;
+        taskSlug?: T;
+        taskID?: T;
+        input?: T;
+        output?: T;
+        state?: T;
+        error?: T;
+        id?: T;
+      };
+  taskSlug?: T;
+  queue?: T;
+  waitUntil?: T;
+  processing?: T;
   updatedAt?: T;
   createdAt?: T;
-  email?: T;
-  resetPasswordToken?: T;
-  resetPasswordExpiration?: T;
-  salt?: T;
-  hash?: T;
-  loginAttempts?: T;
-  lockUntil?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1023,6 +1265,26 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
   batch?: T;
   updatedAt?: T;
   createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "collections_widget".
+ */
+export interface CollectionsWidget {
+  data?: {
+    [k: string]: unknown;
+  };
+  width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskEcommerce-delete-expired-carts".
+ */
+export interface TaskEcommerceDeleteExpiredCarts {
+  input?: unknown;
+  output: {
+    deleted?: number | null;
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

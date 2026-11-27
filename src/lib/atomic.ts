@@ -50,6 +50,32 @@ interface AdapterInternals {
 
 const internals = (payload: Payload): AdapterInternals => payload.db as unknown as AdapterInternals
 
+/** Which fallbacks have already been reported, per Payload instance. */
+const reportedFallbacks = new WeakMap<Payload, Set<string>>()
+
+/**
+ * Logs, once per Payload instance and per kind of update, that the atomic statement is not
+ * available and the read-then-write fallback is used instead. Without this the fallback
+ * would be silent, and the first sign of it would be oversold stock under load: the
+ * statements rely on parts of the database adapters that are not public API and can
+ * change in a Payload release.
+ */
+const warnAboutFallback = (payload: Payload, what: string, collection: string): void => {
+  const key = `${what}:${collection}`
+  const reported = reportedFallbacks.get(payload) ?? new Set<string>()
+  if (reported.has(key)) {
+    return
+  }
+  reported.add(key)
+  reportedFallbacks.set(payload, reported)
+
+  payload.logger.warn(
+    `[payload-ecommerce] No atomic ${what} update for collection "${collection}" with database adapter "${internals(payload).name ?? 'unknown'}": ` +
+      'the adapter is not supported, its internals changed, or the table or column has a custom database name. ' +
+      'Falling back to read-then-write, which can oversell stock or miscount under concurrent requests.',
+  )
+}
+
 /**
  * Returns the key under which the adapter keeps the session of the request's transaction,
  * or `undefined` when the request has no transaction. Adapters that run without
@@ -273,6 +299,7 @@ export const adjustStock = async (
   }
 
   // Non-atomic fallback: read, check, write.
+  warnAboutFallback(payload, variant !== undefined ? 'variant stock' : 'stock', productsSlug)
   const product = await payload.findByID({
     id: productId,
     collection: productsSlug,
@@ -384,6 +411,7 @@ export const adjustCouponUsage = async (
   }
 
   // Non-atomic fallback: read, check, write.
+  warnAboutFallback(payload, 'coupon usage', couponsSlug)
   const coupon = await payload.findByID({
     id: couponId,
     collection: couponsSlug,
@@ -460,6 +488,7 @@ export const claimOrderRelease = async (
 
   // Non-atomic fallback: read, check, write. Two simultaneous callers can both read the
   // flag as set and both be told they cleared it.
+  warnAboutFallback(payload, `order ${flag}`, ordersSlug)
   const order = await payload.findByID({
     id: orderId,
     collection: ordersSlug,

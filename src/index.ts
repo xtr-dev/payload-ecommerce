@@ -1,6 +1,7 @@
 import type { CollectionConfig, Config } from 'payload'
 
 import type { IsAdmin } from './lib/access.js'
+import type { CartCleanupSchedule } from './lib/cartExpiry.js'
 import type { RoundMoney } from './lib/money.js'
 import type { EcommerceCustomConfig, EcommerceSlugs } from './lib/slugs.js'
 
@@ -39,7 +40,7 @@ export {
   deleteExpiredCarts,
   isCartExpired,
 } from './lib/cartExpiry.js'
-export type { DeleteExpiredCartsOptions } from './lib/cartExpiry.js'
+export type { CartCleanupSchedule, DeleteExpiredCartsOptions } from './lib/cartExpiry.js'
 export { resolveUnitPrice } from './lib/pricing.js'
 export type { PricedProduct } from './lib/pricing.js'
 export { slugify } from './lib/slug.js'
@@ -58,11 +59,16 @@ export type PayloadEcommerceConfig = {
   /**
    * Registers the `ecommerce-delete-expired-carts` jobs task, which deletes every cart
    * past its `expiresAt`. Off by default, so a host without a jobs runner is unaffected.
-   * The plugin does not schedule the task: queue it from your own schedule with
-   * `payload.jobs.queue({ task: 'ecommerce-delete-expired-carts', input: {} })`, or call
-   * the exported `deleteExpiredCarts(payload)` directly instead of using a task.
+   *
+   * - `true`: the task is registered but not scheduled. Queue it from your own schedule
+   *   with `payload.jobs.queue({ task: 'ecommerce-delete-expired-carts', input: {} })`.
+   * - `{ schedule: [{ cron: '0 3 * * *', queue: 'nightly' }] }`: Payload queues it at
+   *   those times. This needs a Payload version that supports `schedule` on tasks
+   *   (verified with 3.94) and a jobs runner that handles schedules and processes that queue.
+   *
+   * Or call the exported `deleteExpiredCarts(payload)` directly instead of using a task.
    */
-  cartCleanupTask?: boolean
+  cartCleanupTask?: { schedule?: CartCleanupSchedule[] } | boolean
 
   /**
    * Slug of the auth collection whose users are the shop's customers. Default: `'users'`.
@@ -230,7 +236,13 @@ export const payloadEcommerce =
       if (!tasks.some((task) => task.slug === DELETE_EXPIRED_CARTS_TASK_SLUG)) {
         config.jobs = {
           ...(config.jobs ?? {}),
-          tasks: [...tasks, createDeleteExpiredCartsTask(slugs.carts)],
+          tasks: [
+            ...tasks,
+            createDeleteExpiredCartsTask(
+              slugs.carts,
+              typeof pluginOptions.cartCleanupTask === 'object' ? pluginOptions.cartCleanupTask.schedule : undefined,
+            ),
+          ],
         }
       }
     }

@@ -8,14 +8,11 @@ export async function POST(request: Request) {
     const payload = await getPayload({ config: configPromise });
 
     const body = await request.json();
-    const { productId: rawProductId, variant } = body;
+    const { productId, variant } = body;
 
-    if (!rawProductId) {
+    if (!productId) {
       return NextResponse.json({ error: 'Product ID is required' }, { status: 400 });
     }
-
-    // Convert product ID to number for SQLite
-    const productId = typeof rawProductId === 'string' ? parseInt(rawProductId, 10) : rawProductId;
 
     const sessionId = request.headers.get('x-session-id') || 'demo-session';
 

@@ -46,7 +46,8 @@ export default buildConfig({
   editor: lexicalEditor(),
   plugins: [
     payloadEcommerce({
-      cartCleanupTask: true,
+      // Scheduled every second on its own queue, so the test can let Payload queue it.
+      cartCleanupTask: { schedule: [{ cron: '* * * * * *', queue: 'cart-cleanup' }] },
       collections: {
         carts: 'baskets',
         categories: 'shop-categories',

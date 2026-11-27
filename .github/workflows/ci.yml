@@ -25,6 +25,11 @@ env:
   # MongoDB server version that mongodb-memory-server downloads for "Test (MongoDB)".
   # Pinned so the cached binary below stays valid until this line changes.
   MONGOMS_VERSION: 7.0.14
+  # The oldest Payload the plugin supports; keep equal to the lower bound of
+  # peerDependencies.payload in package.json. "Test (oldest supported Payload)" installs
+  # it, with the Next.js version that Payload release works with, over the locked versions.
+  MIN_PAYLOAD_VERSION: 3.37.0
+  MIN_PAYLOAD_NEXT_VERSION: 15.4.4
 
 jobs:
   check:
@@ -45,6 +50,13 @@ jobs:
           - name: Test (MongoDB)
             run: pnpm test:mongo
             mongodb: true
+          # The lockfile has the newest Payload the plugin is developed on. This job runs
+          # both test suites on the oldest one the peer range allows, because the atomic
+          # stock and coupon statements use adapter internals that differ between releases.
+          - name: Test (oldest supported Payload)
+            run: pnpm test && pnpm test:mongo
+            mongodb: true
+            oldestPayload: true
           - name: Build and verify packed exports
             run: pnpm test:pack
     steps:
@@ -70,6 +82,19 @@ jobs:
         with:
           path: ${{ runner.temp }}/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}-${{ env.MONGOMS_VERSION }}
+
+      - name: Install the oldest supported Payload
+        if: matrix.task.oldestPayload
+        run: >-
+          pnpm add -D
+          payload@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/db-mongodb@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/db-postgres@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/db-sqlite@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/next@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/richtext-lexical@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/ui@${{ env.MIN_PAYLOAD_VERSION }}
+          next@${{ env.MIN_PAYLOAD_NEXT_VERSION }}
 
       - name: ${{ matrix.task.name }}
         run: ${{ matrix.task.run }}

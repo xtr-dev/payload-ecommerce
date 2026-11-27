@@ -9,14 +9,11 @@ export async function POST(request: Request) {
     const ecommerce = useEcommerce(payload);
 
     const body = await request.json();
-    const { productId: rawProductId, quantity = 1, variant } = body;
+    const { productId, quantity = 1, variant } = body;
 
-    if (!rawProductId) {
+    if (!productId) {
       return NextResponse.json({ error: 'Product ID is required' }, { status: 400 });
     }
-
-    // Convert product ID to number for SQLite
-    const productId = typeof rawProductId === 'string' ? parseInt(rawProductId, 10) : rawProductId;
 
     // For demo purposes, we'll use a session-based cart (no user authentication required)
     // In a real app, you would get the user ID from the session/auth

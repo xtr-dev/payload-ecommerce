@@ -69,11 +69,30 @@ export const deleteExpiredCarts = async (
 }
 
 /**
+ * When the cart cleanup task runs on its own. Same shape as an entry of a Payload task's
+ * `schedule`; declared here because Payload versions before task schedules existed do not
+ * export the type.
+ */
+export interface CartCleanupSchedule {
+  /** Cron expression, for example `'0 3 * * *'` for every night at 03:00. */
+  cron: string
+  /** Queue the job is added to. Your jobs runner (`jobs.autoRun` or `payload jobs:run`) has to process it. */
+  queue: string
+}
+
+/**
  * Builds the Payload jobs task that deletes expired carts. The plugin registers it when
  * the `cartCleanupTask` option is set; it can also be added to `jobs.tasks` by hand.
  * The task takes no input and reports the number of deleted carts as `deleted`.
+ *
+ * With a `schedule`, Payload queues the task itself at those times (this needs a Payload
+ * version with task schedules and a jobs runner that handles schedules); without one the
+ * host queues it.
  */
-export const createDeleteExpiredCartsTask = (cartsSlug?: string): TaskConfig<any> => ({
+export const createDeleteExpiredCartsTask = (
+  cartsSlug?: string,
+  schedule?: CartCleanupSchedule[],
+): TaskConfig<any> => ({
   slug: DELETE_EXPIRED_CARTS_TASK_SLUG,
   handler: async ({ req }: { req: PayloadRequest }) => {
     const { deleted } = await deleteExpiredCarts(req.payload, { cartsSlug, req })
@@ -82,4 +101,5 @@ export const createDeleteExpiredCartsTask = (cartsSlug?: string): TaskConfig<any
   },
   label: 'Delete expired carts',
   outputSchema: [{ name: 'deleted', type: 'number' }],
+  ...(schedule?.length ? { schedule } : {}),
 })

@@ -6,6 +6,8 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Next 16 otherwise writes an AGENTS.md into dev/ on every `next dev` start.
+  agentRules: false,
   webpack: (webpackConfig) => {
     webpackConfig.resolve.extensionAlias = {
       '.cjs': ['.cts', '.cjs'],
