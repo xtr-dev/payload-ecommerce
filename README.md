@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/@xtr-dev/payload-ecommerce.svg)](https://www.npmjs.com/package/@xtr-dev/payload-ecommerce)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-⚠️ **Pre-release** - This package is in active development (v0.0.x). Breaking changes may occur before v1.0.0.
+**v0.x** — minor versions may contain breaking changes until 1.0.
 
 ## Features
 
