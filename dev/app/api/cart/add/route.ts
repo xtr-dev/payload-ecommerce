@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
-import { useEcommerce } from 'payload-ecommerce';
+import { resolveUnitPrice, useEcommerce } from 'payload-ecommerce';
 
 export async function POST(request: Request) {
   try {
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       for (const item of cartWithDetails.items) {
         const product = typeof item.product === 'object' ? item.product : null;
         if (product) {
-          subtotal += product.price * item.quantity;
+          subtotal += resolveUnitPrice(product, item.variant) * item.quantity;
         }
       }
     }
@@ -65,8 +65,8 @@ export async function POST(request: Request) {
     let finalSubtotal = 0;
     if (finalCart.items && Array.isArray(finalCart.items)) {
       for (const item of finalCart.items) {
-        if (item.product && typeof item.product === 'object' && item.product.price) {
-          finalSubtotal += item.product.price * (item.quantity || 1);
+        if (item.product && typeof item.product === 'object') {
+          finalSubtotal += resolveUnitPrice(item.product, item.variant) * (item.quantity || 1);
         }
       }
     }

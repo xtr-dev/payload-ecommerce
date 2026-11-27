@@ -54,7 +54,7 @@ The plugin adds the five collections below. Orders and carts relate to a `users`
 
 ### Products
 - Title, slug (generated from the title when empty), description, price, compare-at price, SKU, barcode, images
-- Variants (size, color, etc.), each with an optional price, SKU and own stock number
+- Variants (size, color, etc.), each with an optional price, SKU and own stock number. A variant's price, when filled in, replaces the product's price for cart and order lines of that variant (see [Prices](#prices))
 - Categories (many per product)
 - Optional stock tracking (`inventory.trackQuantity`, `inventory.quantity`). `inventory.lowStockThreshold` is a plain field for your own use; the plugin sends no low-stock alerts
 - Status: draft | active | archived
@@ -68,7 +68,7 @@ The plugin adds the five collections below. Orders and carts relate to a `users`
 
 ### Carts
 - For a logged-in user or a guest session id
-- Auto-calculated subtotal
+- Auto-calculated subtotal, each line priced with its variant's price when the variant has one
 - Expire 30 days after the last change (see [Carts](#carts-1))
 
 ### Coupons
@@ -96,7 +96,7 @@ await ecommerce.cart.addToCart({
   sessionId: 'session-123',
   productId: 'product-id',
   quantity: 2,
-  variant: 'SIZE-M', // optional
+  variant: 'Medium', // optional; the `name` of one of the product's variants
 })
 
 // Create order from cart
@@ -126,6 +126,19 @@ import { getRelationshipId } from '@xtr-dev/payload-ecommerce'
 
 const productIds = cart.items.map((item) => getRelationshipId(item.product))
 ```
+
+### Prices
+
+A cart or order line is identified by its product and, optionally, the `name` of one of that product's variants. One function decides what a unit costs, and the cart subtotal and `createOrderFromCart` both use it:
+
+```typescript
+import { resolveUnitPrice } from '@xtr-dev/payload-ecommerce'
+
+resolveUnitPrice(product)          // product.price
+resolveUnitPrice(product, 'Large') // the variant's own price when it has one, else product.price
+```
+
+A variant price of `0` is a real price (a free variant); leave the field empty to use the product's price. A variant name the product does not have is priced at the product's price. Use the same function wherever your storefront shows a line price, so it matches the subtotal.
 
 ## Example Implementation
 

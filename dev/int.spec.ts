@@ -13,6 +13,7 @@ import {
   getRelationshipId,
   isCartExpired,
   payloadEcommerce,
+  resolveUnitPrice,
   slugify,
   useEcommerce,
 } from '../src/index.js'
@@ -1206,6 +1207,111 @@ describe('Ecommerce Plugin integration tests', () => {
   // The tests below run on SQLite, where document ids are numbers. The plugin used to
   // recognise only string ids (MongoDB) as "not populated", so numeric ids were read as
   // populated documents without an `id` and the related product or coupon was lost.
+  describe('variant prices', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+      postalCode: '1000 AA',
+      state: 'NH',
+    }
+
+    // Base price 10; "Large" overrides it, "Small" leaves its price empty, "Sample" is free.
+    const createProductWithVariants = async (title: string) =>
+      await payload.create({
+        collection: 'products',
+        data: {
+          price: 10,
+          status: 'active',
+          title,
+          variants: [
+            { name: 'Large', price: 15 },
+            { name: 'Small' },
+            { name: 'Sample', price: 0 },
+          ],
+        },
+      })
+
+    test('resolveUnitPrice uses the variant price when it is filled in and the product price otherwise', () => {
+      const product = {
+        price: 10,
+        variants: [
+          { name: 'Large', price: 15 },
+          { name: 'Small', price: null },
+          { name: 'Sample', price: 0 },
+        ],
+      }
+
+      expect(resolveUnitPrice(product)).toBe(10)
+      expect(resolveUnitPrice(product, 'Large')).toBe(15)
+      expect(resolveUnitPrice(product, 'Small')).toBe(10)
+      expect(resolveUnitPrice(product, 'Sample')).toBe(0)
+      expect(resolveUnitPrice(product, 'Unknown')).toBe(10)
+      expect(resolveUnitPrice({ price: null }, 'Large')).toBe(0)
+      expect(resolveUnitPrice(undefined)).toBe(0)
+    })
+
+    test('the cart subtotal prices each line at its variant price', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProductWithVariants('Variant Price Cart Product')
+      const sessionId = 'variant-price-cart-session'
+
+      await ecommerce.cart.addToCart({ productId: product.id, quantity: 2, sessionId, variant: 'Large' })
+      await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId, variant: 'Small' })
+      await ecommerce.cart.addToCart({ productId: product.id, quantity: 3, sessionId, variant: 'Sample' })
+      const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId })
+
+      // 2 × 15 (Large) + 1 × 10 (Small, no own price) + 3 × 0 (Sample) + 1 × 10 (no variant)
+      expect(cart.subtotal).toBe(50)
+    })
+
+    test('the cart subtotal uses the variant price when the saved items hold populated products', async () => {
+      const product = await createProductWithVariants('Variant Price Populated Product')
+      const cart = await payload.create({
+        collection: 'carts',
+        data: {
+          items: [{ product: product.id, quantity: 1, variant: 'Large' }],
+          sessionId: 'variant-price-populated-session',
+        },
+      })
+
+      // Saving the items as they were read at depth 1 passes the populated product to the hook.
+      const populated = await payload.findByID({ id: cart.id, collection: 'carts', depth: 1 })
+      const updated = await payload.update({
+        id: cart.id,
+        collection: 'carts',
+        data: {
+          items: populated.items.map((item: { quantity: number }) => ({ ...item, quantity: 2 })),
+        },
+      })
+
+      expect(updated.subtotal).toBe(30)
+    })
+
+    test('createOrderFromCart prices each line at its variant price, matching the cart subtotal', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProductWithVariants('Variant Price Order Product')
+      const sessionId = 'variant-price-order-session'
+
+      await ecommerce.cart.addToCart({ productId: product.id, quantity: 2, sessionId, variant: 'Large' })
+      const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId })
+      expect(cart.subtotal).toBe(40)
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: { shippingAddress: address },
+      })
+
+      const stored = await payload.findByID({ id: order.id, collection: 'orders', depth: 0 })
+      expect(stored.items).toHaveLength(2)
+      expect(stored.items[0]).toMatchObject({ price: 15, quantity: 2, total: 30, variant: 'Large' })
+      expect(stored.items[1]).toMatchObject({ price: 10, quantity: 1, total: 10 })
+      expect(stored.subtotal).toBe(40)
+    })
+  })
+
   describe('order flow with numeric ids', () => {
     const address = {
       address1: '1 Main Street',
