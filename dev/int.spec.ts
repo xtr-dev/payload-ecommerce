@@ -18,7 +18,9 @@ import {
   defaultIsAdmin,
   payloadEcommerce,
   resolveUnitPrice,
+  roundToTwoDecimals,
   slugify,
+  toDocumentId,
   useEcommerce,
 } from '../src/index.js'
 
@@ -2392,6 +2394,249 @@ describe('Ecommerce Plugin integration tests', () => {
         const bobsCart = await payload.findByID({ id: bobCart.id, collection: 'carts' })
         expect(bobsCart.items).toHaveLength(1)
       })
+    })
+  })
+
+  describe('money rounding', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+    }
+
+    test('roundToTwoDecimals rounds halves up, also where floating point stores them just below', () => {
+      expect(roundToTwoDecimals(3.333)).toBe(3.33)
+      expect(roundToTwoDecimals(1.005)).toBe(1.01)
+      expect(roundToTwoDecimals(2.675)).toBe(2.68)
+      expect(roundToTwoDecimals(10)).toBe(10)
+      expect(roundToTwoDecimals(0)).toBe(0)
+    })
+
+    test('calculateOrderTotal applies the rounding it is given', () => {
+      const parts = { discount: 199.5, shipping: 0, subtotal: 1995, tax: 0.2 }
+
+      expect(calculateOrderTotal(parts)).toBe(1795.7)
+      expect(calculateOrderTotal(parts, Math.round)).toBe(1796)
+      expect(calculateOrderTotal({ discount: 50, subtotal: 10 }, Math.round)).toBe(0)
+    })
+
+    test('by default a percentage discount, tax and total are rounded to two decimals', async () => {
+      const ecommerce = useEcommerce(payload)
+      const code = `ROUND${Date.now()}`
+      const product = await payload.create({
+        collection: 'products',
+        data: { price: 33.33, status: 'active', title: `Rounding Product ${code}` },
+      })
+      await payload.create({
+        collection: 'coupons',
+        data: { code, status: 'active', type: 'percentage', value: 10 },
+      })
+
+      // 10% of 33.33 is 3.333.
+      expect((await ecommerce.coupons.validateCoupon({ cartTotal: 33.33, code })).discount).toBe(3.33)
+
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: `rounding-${code}`,
+      })
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: { couponCode: code, shippingAddress: address },
+      })
+
+      // The dev config taxes 10% of (33.33 − 3.33) = 3.
+      expect(order).toMatchObject({ discount: 3.33, subtotal: 33.33, tax: 3, total: 33 })
+      expect(ecommerce.orders.calculateTotal({ discount: 3.33, subtotal: 33.33, tax: 3.004 })).toBe(33)
+    })
+  })
+
+  describe('ids that arrive as text', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+    }
+
+    test('toDocumentId converts to the id type of the collection', () => {
+      if (usesMongoDB) {
+        expect(toDocumentId(payload, 'products', 12)).toBe('12')
+        expect(toDocumentId(payload, 'products', '6650f0c0a1b2c3d4e5f60718')).toBe('6650f0c0a1b2c3d4e5f60718')
+      } else {
+        expect(toDocumentId(payload, 'products', '12')).toBe(12)
+        expect(toDocumentId(payload, 'products', 12)).toBe(12)
+        // Not a numeric id: left alone, for Payload to reject.
+        expect(toDocumentId(payload, 'products', '12abc')).toBe('12abc')
+        expect(toDocumentId(payload, 'products', '1.5')).toBe('1.5')
+      }
+      expect(toDocumentId(payload, 'products', undefined)).toBeUndefined()
+      expect(toDocumentId(payload, 'products', null)).toBeNull()
+    })
+
+    // On SQLite every id below is a numeric string such as '12', the form in which an id
+    // arrives from a URL parameter or a form; on MongoDB String() changes nothing.
+    test('cart, order, coupon and product helpers accept ids as strings', async () => {
+      const ecommerce = useEcommerce(payload)
+      const run = `${Date.now()}`
+      const user = await payload.create({
+        collection: 'users',
+        data: { email: `string-ids-${run}@example.com`, password: 'string-ids-password', role: 'customer' },
+      })
+      const product = await payload.create({
+        collection: 'products',
+        data: {
+          inventory: { quantity: 10, trackQuantity: true },
+          price: 10,
+          status: 'active',
+          title: `String Id Product ${run}`,
+        },
+      })
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: `STRINGID${run}`, customerLimit: 1, status: 'active', type: 'fixed', value: 5 },
+      })
+
+      const productId = String(product.id)
+      const userId = String(user.id)
+
+      const cart = await ecommerce.cart.addToCart({ productId, quantity: 1, userId })
+      expect(getRelationshipId(cart.user)).toBe(user.id)
+      expect(getRelationshipId(cart.items[0].product)).toBe(product.id)
+      const cartId = String(cart.id)
+
+      // Adding again finds the cart and the line instead of creating second ones.
+      const again = await ecommerce.cart.addToCart({ productId, quantity: 1, userId })
+      expect(again.id).toBe(cart.id)
+      expect(again.items).toHaveLength(1)
+      expect(again.items[0].quantity).toBe(2)
+
+      expect((await ecommerce.cart.getCart(userId))?.id).toBe(cart.id)
+      expect((await ecommerce.cart.updateCartItem({ cartId, productId, quantity: 3 })).items[0].quantity).toBe(3)
+      expect((await ecommerce.cart.removeFromCart({ cartId, productId })).items).toHaveLength(0)
+      await ecommerce.cart.addToCart({ productId, quantity: 2, userId })
+      expect((await ecommerce.cart.clearCart(cartId)).items).toHaveLength(0)
+      await ecommerce.cart.addToCart({ productId, quantity: 2, userId })
+
+      expect((await ecommerce.products.getProduct(productId)).id).toBe(product.id)
+      expect((await ecommerce.products.checkInventory(productId, 10)).available).toBe(true)
+      expect((await ecommerce.products.reduceInventory(productId, 1)).inventory.quantity).toBe(9)
+      expect((await ecommerce.products.restoreInventory(productId, 1)).inventory.quantity).toBe(10)
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId,
+        orderData: { coupon: String(coupon.id), shippingAddress: address },
+      })
+      expect(getRelationshipId(order.coupon)).toBe(coupon.id)
+      expect(order.discount).toBe(5)
+      const orderId = String(order.id)
+
+      expect((await ecommerce.orders.getOrder(orderId)).id).toBe(order.id)
+      expect((await ecommerce.orders.getUserOrders(userId)).docs.map((doc) => doc.id)).toEqual([order.id])
+      // The customer's earlier order is found, so the per-customer limit applies.
+      expect(
+        await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: coupon.code, userId }),
+      ).toMatchObject({ error: 'Customer usage limit reached', valid: false })
+
+      const cancelled = await ecommerce.orders.updateOrderStatus({ orderId, status: 'cancelled' })
+      expect(cancelled.status).toBe('cancelled')
+      expect((await ecommerce.products.getProduct(productId)).inventory.quantity).toBe(10)
+    })
+  })
+
+  describe('addresses and guest orders', () => {
+    const product = async () =>
+      await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'active', title: `Address Product ${Date.now()}-${Math.random()}` },
+      })
+
+    // No state or province and no postal code, as in an address in Hong Kong.
+    const addressWithoutStateOrPostalCode = {
+      address1: '1 Queen\'s Road Central',
+      city: 'Hong Kong',
+      country: 'HK',
+      firstName: 'Test',
+      lastName: 'Customer',
+    }
+
+    test('an order needs no state, postal code or billing address', async () => {
+      const { id } = await product()
+      const order = await payload.create({
+        collection: 'orders',
+        data: {
+          items: [{ price: 10, product: id, quantity: 1, total: 10 }],
+          shippingAddress: addressWithoutStateOrPostalCode,
+          subtotal: 10,
+        },
+      })
+
+      expect(order.shippingAddress).toMatchObject(addressWithoutStateOrPostalCode)
+      expect(order.shippingAddress.state ?? null).toBeNull()
+      expect(order.billingAddress?.address1 ?? null).toBeNull()
+    })
+
+    test.each(['firstName', 'lastName', 'address1', 'city', 'country'])(
+      'a shipping address without %s is rejected',
+      async (field) => {
+        const { id } = await product()
+        const { [field]: _removed, ...incomplete } = addressWithoutStateOrPostalCode as Record<string, string>
+
+        await expect(
+          payload.create({
+            collection: 'orders',
+            data: {
+              items: [{ price: 10, product: id, quantity: 1, total: 10 }],
+              shippingAddress: incomplete,
+              subtotal: 10,
+            },
+          }),
+        ).rejects.toThrow(/invalid/i)
+      },
+    )
+
+    test('a guest cart becomes an order without a user that carries the customer email', async () => {
+      const ecommerce = useEcommerce(payload)
+      const { id } = await product()
+      const sessionId = `guest-order-${Date.now()}`
+
+      const cart = await ecommerce.cart.addToCart({ productId: id, quantity: 2, sessionId })
+      expect(cart.user ?? null).toBeNull()
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: {
+          customerEmail: 'guest@example.com',
+          shippingAddress: addressWithoutStateOrPostalCode,
+        },
+      })
+
+      expect(order.user ?? null).toBeNull()
+      expect(order.customerEmail).toBe('guest@example.com')
+      expect(order.subtotal).toBe(20)
+      // The billing address defaults to the shipping address.
+      expect(order.billingAddress).toMatchObject(addressWithoutStateOrPostalCode)
+      expect((await ecommerce.cart.getCart(undefined, sessionId))?.items).toEqual([])
+    })
+
+    test('an order with something that is not an email address as customerEmail is rejected', async () => {
+      const ecommerce = useEcommerce(payload)
+      const { id } = await product()
+      const cart = await ecommerce.cart.addToCart({
+        productId: id,
+        quantity: 1,
+        sessionId: `guest-bad-email-${Date.now()}`,
+      })
+
+      await expect(
+        ecommerce.orders.createOrderFromCart({
+          cartId: cart.id,
+          orderData: { customerEmail: 'not an email', shippingAddress: addressWithoutStateOrPostalCode },
+        }),
+      ).rejects.toThrow(/invalid/i)
     })
   })
 })

@@ -1,4 +1,4 @@
-import type { CollectionConfig, PayloadRequest } from 'payload'
+import type { CollectionConfig, Field, PayloadRequest } from 'payload'
 import { ValidationError } from 'payload'
 import type { PayloadEcommerceConfig } from '../index.js'
 import { describeStockShortage, resolveStockTarget } from '../lib/products.js'
@@ -8,6 +8,7 @@ import type { DocumentId } from '../lib/relationships.js'
 import type { EcommerceSlugs } from '../lib/slugs.js'
 import { getRelationshipId } from '../lib/relationships.js'
 import { calculateOrderTotal } from '../lib/totals.js'
+import { getRoundMoney } from '../lib/money.js'
 
 /**
  * Order fields that are passed to the `calculateTax` hook. A change to any of them can
@@ -53,50 +54,25 @@ const isDeepEqual = (a: unknown, b: unknown): boolean => {
 /** Order fields whose change requires `total` to be computed again. */
 const TOTAL_INPUT_FIELDS = ['subtotal', 'discount', 'tax', 'shipping', 'total']
 
-const addressFields = [
-  {
-    name: 'firstName',
-    type: 'text' as const,
-    required: true,
-  },
-  {
-    name: 'lastName',
-    type: 'text' as const,
-    required: true,
-  },
-  {
-    name: 'address1',
-    type: 'text' as const,
-    required: true,
-  },
-  {
-    name: 'address2',
-    type: 'text' as const,
-  },
-  {
-    name: 'city',
-    type: 'text' as const,
-    required: true,
-  },
-  {
-    name: 'state',
-    type: 'text' as const,
-    required: true,
-  },
-  {
-    name: 'postalCode',
-    type: 'text' as const,
-    required: true,
-  },
-  {
-    name: 'country',
-    type: 'text' as const,
-    required: true,
-  },
-  {
-    name: 'phone',
-    type: 'text' as const,
-  },
+/**
+ * The fields of an order address. `required` is what the shipping address needs to be
+ * deliverable: a name, a street, a city and a country. `state` and `postalCode` are never
+ * required, because many countries have no states or provinces in their addresses and
+ * some have no postal codes.
+ *
+ * The billing address uses the same fields with nothing required: an order may have no
+ * separate billing address at all, and a group with a required field cannot be left empty.
+ */
+const addressFields = (required: boolean): Field[] => [
+  { name: 'firstName', type: 'text', required },
+  { name: 'lastName', type: 'text', required },
+  { name: 'address1', type: 'text', required },
+  { name: 'address2', type: 'text' },
+  { name: 'city', type: 'text', required },
+  { name: 'state', type: 'text' },
+  { name: 'postalCode', type: 'text' },
+  { name: 'country', type: 'text', required },
+  { name: 'phone', type: 'text' },
 ]
 
 interface OrderLine {
@@ -248,6 +224,14 @@ export const createOrders = (
       relationTo: slugs.users,
       admin: {
         description: 'User who placed the order (optional for guest orders)',
+      },
+    },
+    {
+      name: 'customerEmail',
+      type: 'email',
+      admin: {
+        description:
+          'Where to reach the customer about this order. Needed for a guest order, which has no user.',
       },
     },
     {
@@ -403,12 +387,15 @@ export const createOrders = (
     {
       name: 'shippingAddress',
       type: 'group',
-      fields: addressFields,
+      fields: addressFields(true),
     },
     {
       name: 'billingAddress',
       type: 'group',
-      fields: addressFields,
+      admin: {
+        description: 'Optional. createOrderFromCart copies the shipping address when none is given.',
+      },
+      fields: addressFields(false),
     },
     {
       name: 'notes',
@@ -620,7 +607,8 @@ export const createOrders = (
 
             // A hook that taxes (subtotal − discount) returns a negative amount when the
             // discount exceeds the subtotal; tax is never negative, so that becomes 0.
-            data.tax = Math.max(0, tax)
+            // A rate times an amount rarely is a whole money unit, so it is rounded here.
+            data.tax = Math.max(0, getRoundMoney(req.payload)(tax))
           }
 
           if (operation === 'create' && config.hooks?.beforeCreateOrder) {
@@ -632,12 +620,15 @@ export const createOrders = (
           // required `total` at all, and after beforeCreateOrder so amounts changed by that
           // hook count. On update it runs only when an amount (or the total itself) changes.
           if (operation === 'create' || TOTAL_INPUT_FIELDS.some(isChanged)) {
-            data.total = calculateOrderTotal({
-              subtotal: current('subtotal'),
-              discount: current('discount'),
-              tax: current('tax'),
-              shipping: current('shipping'),
-            })
+            data.total = calculateOrderTotal(
+              {
+                subtotal: current('subtotal'),
+                discount: current('discount'),
+                tax: current('tax'),
+                shipping: current('shipping'),
+              },
+              getRoundMoney(req.payload),
+            )
           }
 
           return data

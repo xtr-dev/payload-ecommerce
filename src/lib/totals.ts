@@ -1,3 +1,5 @@
+import type { RoundMoney } from './money.js'
+
 export interface OrderTotalParts {
   /** Sum of the order's line totals, before discount, tax and shipping. */
   subtotal?: null | number
@@ -19,14 +21,17 @@ const amount = (value: null | number | undefined): number =>
 /**
  * The only place an order's `total` is computed: subtotal − discount + tax + shipping.
  *
- * The result is never negative (a discount larger than the rest of the order gives 0) and
- * is rounded to six decimals. That rounding only removes binary floating point noise such
- * as 0.1 + 0.2 = 0.30000000000000004; it is not currency rounding, which is left to the
- * caller because the number of minor units differs per currency.
+ * The result is never negative (a discount larger than the rest of the order gives 0).
+ * Binary floating point noise such as 0.1 + 0.2 = 0.30000000000000004 is always removed
+ * (rounding to six decimals). Currency rounding is done by `roundMoney` when it is given:
+ * the orders collection passes the plugin's `roundMoney` option, and
+ * `useEcommerce(payload).orders.calculateTotal` does the same for a total shown before the
+ * order exists. Without it the total is not rounded to a currency unit.
  */
-export const calculateOrderTotal = (parts: OrderTotalParts): number => {
+export const calculateOrderTotal = (parts: OrderTotalParts, roundMoney?: RoundMoney): number => {
   const total =
     amount(parts.subtotal) - amount(parts.discount) + amount(parts.tax) + amount(parts.shipping)
+  const withoutNoise = Math.round(total * 1e6) / 1e6
 
-  return Math.max(0, Math.round(total * 1e6) / 1e6)
+  return Math.max(0, roundMoney ? roundMoney(withoutNoise) : withoutNoise)
 }

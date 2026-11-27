@@ -26,10 +26,10 @@ export const useEcommerce = (payload: Payload, options: EcommerceHelperOptions =
   // The slugs the plugin recorded in the config, so renamed collections need no arguments here.
   const slugs = getEcommerceSlugs(payload)
 
-  const cart = createCartHelpers(payload, slugs.carts, options)
-  const orders = createOrderHelpers(payload, slugs.orders, slugs.carts, slugs.products, slugs.coupons, options)
-  const coupons = createCouponHelpers(payload, slugs.coupons, slugs.orders, options)
-  const products = createProductHelpers(payload, slugs.products, options)
+  const cart = createCartHelpers(payload, slugs, options)
+  const orders = createOrderHelpers(payload, slugs, options)
+  const coupons = createCouponHelpers(payload, slugs, options)
+  const products = createProductHelpers(payload, slugs, options)
 
   return {
     cart,

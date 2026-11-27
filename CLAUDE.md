@@ -34,7 +34,7 @@ pnpm dev:generate-types    # Regenerate Payload types
 
 ### Collections Created
 - **products** - Catalog with title, slug (generated when empty), price, variants, images and optional stock tracking. `inventory.lowStockThreshold` is only a field; nothing alerts on it
-- **orders** - Items, addresses, status and payment status fields. The total is always computed (`subtotal − discount + tax + shipping`). Creating an order checks and reduces stock and counts the coupon; moving it to cancelled/refunded puts both back
+- **orders** - Items, addresses (shipping: name, address1, city, country required; state/postalCode optional; billing all optional), optional `user`, `customerEmail` for guests, status and payment status fields. The total is always computed (`subtotal − discount + tax + shipping`). Creating an order checks and reduces stock and counts the coupon; moving it to cancelled/refunded puts both back
 - **carts** - For a user or guest session, expiring 30 days after the last change. Expired carts are ignored by the helpers and removed by `deleteExpiredCarts`
 - **categories** - Name, slug (generated when empty) and an optional `parent` relationship (no tree helpers)
 - **coupons** - Percentage, fixed and free-shipping codes, validated and applied when an order is created
@@ -57,6 +57,7 @@ payloadEcommerce({
   },
   userCollection: 'users', // relationTo of orders.user and carts.user; owners in the access rules
   mediaCollection: 'media', // relationTo of products.images
+  roundMoney: (amount) => number, // default: two decimals
   // Who manages the shop; default: user.role === 'admin' or user.roles includes 'admin'
   isAdmin: ({ req }) => boolean,
   // Registers the 'ecommerce-delete-expired-carts' jobs task (not scheduled)
@@ -80,6 +81,8 @@ No collection slug is hardcoded. The collections are factories (`createProducts(
 
 ### Where the logic lives
 - `src/lib/access.ts` - default access rules, `defaultIsAdmin`, and how helpers pass `overrideAccess`/`req`/`user`
+- `src/lib/money.ts` - `roundMoney` (default two decimals; `Math.round` for integer cents), read by hooks and helpers through `getRoundMoney(payload)` and applied to coupon discount, hook tax and order total
+- `src/lib/ids.ts` - `toDocumentId`: every helper converts incoming ids to the collection's id type (numeric strings on SQL)
 - `src/lib/totals.ts` - the only place an order total is computed
 - `src/lib/coupons.ts` - coupon rules (`evaluateCoupon`), shared by `validateCoupon` and the Orders hook
 - `src/lib/atomic.ts` - conditional single-statement stock and coupon-usage updates (SQL via the adapter's `execute`, MongoDB via `$inc`), with a non-atomic fallback
