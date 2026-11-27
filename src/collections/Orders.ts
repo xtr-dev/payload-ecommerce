@@ -18,6 +18,34 @@ const TAX_INPUT_FIELDS = [
   'billingAddress',
 ]
 
+/**
+ * Compares two field values (numbers, strings, address groups, item arrays) by content.
+ * `null` and `undefined` count as the same "no value", because a field the caller left out
+ * arrives as `undefined` while the database returns it as `null`.
+ */
+const isDeepEqual = (a: unknown, b: unknown): boolean => {
+  if (a === b || (a == null && b == null)) {
+    return true
+  }
+
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
+    return false
+  }
+
+  if (Array.isArray(a) !== Array.isArray(b)) {
+    return false
+  }
+
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const key of keys) {
+    if (!isDeepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) {
+      return false
+    }
+  }
+
+  return true
+}
+
 /** Order fields whose change requires `total` to be computed again. */
 const TOTAL_INPUT_FIELDS = ['subtotal', 'discount', 'tax', 'shipping', 'total']
 
@@ -296,16 +324,18 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
             data.orderNumber = `ORD-${timestamp}-${random}`
           }
 
-          // On update `data` holds only the fields being changed, so every amount that is
-          // not part of this change is read from the stored order instead of counting as 0.
+          // Payload fills `data` with the stored value of every field the caller left out
+          // of an update, so "is this field in data" does not tell whether it is being
+          // changed; comparing with the stored order does. `current` still falls back to
+          // the stored order for a field that is missing from `data` altogether.
           const stored: Record<string, unknown> = operation === 'update' ? (originalDoc ?? {}) : {}
           const current = (field: string) => (field in data ? data[field] : stored[field])
+          const isChanged = (field: string) => !isDeepEqual(current(field), stored[field])
 
           // Tax depends on the items, amounts and addresses. It is calculated for every new
-          // order, and for an update only when one of those inputs is part of the change, so
-          // that a status or tracking update does not re-tax an existing order.
-          const changesTaxInput =
-            operation === 'create' || TAX_INPUT_FIELDS.some((field) => field in data)
+          // order, and for an update only when one of those inputs changes, so that a status
+          // or tracking update does not re-tax an existing order at today's rates.
+          const changesTaxInput = operation === 'create' || TAX_INPUT_FIELDS.some(isChanged)
 
           if (changesTaxInput && config.hooks?.calculateTax) {
             try {
@@ -333,9 +363,8 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
           // The total always follows from its parts; a `total` passed by the caller is
           // replaced. This runs before field validation, so callers do not have to pass the
           // required `total` at all, and after beforeCreateOrder so amounts changed by that
-          // hook count. On update it runs only when an amount (or the total itself) is part
-          // of the change.
-          if (operation === 'create' || TOTAL_INPUT_FIELDS.some((field) => field in data)) {
+          // hook count. On update it runs only when an amount (or the total itself) changes.
+          if (operation === 'create' || TOTAL_INPUT_FIELDS.some(isChanged)) {
             data.total = calculateOrderTotal({
               subtotal: current('subtotal'),
               discount: current('discount'),
