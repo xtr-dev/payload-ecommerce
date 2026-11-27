@@ -223,7 +223,7 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(order.total).toBe(50)
     })
 
-    test('updating an order recomputes the total only when an amount changes', async () => {
+    test('updating an order recalculates tax and total only when an amount changes', async () => {
       const product = await createProduct('Totals Update Product', 40)
 
       const order = await payload.create({
@@ -238,7 +238,7 @@ describe('Ecommerce Plugin integration tests', () => {
       })
       expect(order.total).toBe(49)
 
-      // A status change carries no amounts; the stored tax and total must survive it.
+      // A status change touches no amount; the stored tax and total must survive it.
       const shipped = await payload.update({
         id: order.id,
         collection: 'orders',
@@ -247,11 +247,13 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(shipped.tax).toBe(4)
       expect(shipped.total).toBe(49)
 
+      // A changed amount recalculates tax (10% of 40) and the total.
       const reshipped = await payload.update({
         id: order.id,
         collection: 'orders',
         data: { shipping: 12 },
       })
+      expect(reshipped.tax).toBe(4)
       expect(reshipped.total).toBe(56)
 
       const overridden = await payload.update({
@@ -260,6 +262,65 @@ describe('Ecommerce Plugin integration tests', () => {
         data: { total: 1 },
       })
       expect(overridden.total).toBe(56)
+    })
+
+    // Payload hands the hook the stored value of every field an update leaves out, so the
+    // hook has to compare with the stored order to know what changed. The tax hook here
+    // returns a different amount on every call, standing in for tax rules that changed
+    // after the order was placed.
+    test('an update that changes no tax input does not call calculateTax again', async () => {
+      let calls = 0
+      const orders = createOrders({
+        hooks: {
+          calculateTax: () => {
+            calls += 1
+            return calls * 100
+          },
+        },
+      })
+      const beforeChange = orders.hooks?.beforeChange?.[0]
+      const storedOrder = {
+        billingAddress: { ...address, phone: null },
+        discount: 0,
+        items: [{ id: 'row-1', price: 40, product: 1, quantity: 1, total: 40, variant: null }],
+        shipping: 5,
+        shippingAddress: { ...address, phone: null },
+        subtotal: 40,
+        tax: 4,
+        total: 49,
+      }
+      const update = async (changes: Record<string, unknown>) =>
+        await beforeChange!({
+          collection: payload.collections.orders.config,
+          context: {},
+          // What Payload passes for an update: the changed fields over the stored order.
+          data: { ...structuredClone(storedOrder), ...changes },
+          operation: 'update',
+          originalDoc: storedOrder,
+          req: { payload } as never,
+        })
+
+      const statusOnly = await update({ status: 'shipped', trackingNumber: 'TRACK-1' })
+      expect(calls).toBe(0)
+      expect(statusOnly).toMatchObject({ tax: 4, total: 49 })
+
+      // An address without the optional phone equals the stored one, where it is null.
+      const sameAddress = await update({ shippingAddress: { ...address } })
+      expect(calls).toBe(0)
+      expect(sameAddress).toMatchObject({ tax: 4, total: 49 })
+
+      const newShipping = await update({ shipping: 10 })
+      expect(calls).toBe(1)
+      expect(newShipping).toMatchObject({ tax: 100, total: 150 })
+
+      const newAddress = await update({ shippingAddress: { ...address, country: 'BE' } })
+      expect(calls).toBe(2)
+      expect(newAddress).toMatchObject({ tax: 200, total: 245 })
+
+      // A caller-supplied tax changes the total without consulting the hook.
+      const newTax = await update({ tax: 9 })
+      expect(calls).toBe(2)
+      expect(newTax).toMatchObject({ tax: 9, total: 54 })
     })
 
     // The dev config always has a calculateTax hook, so the behaviour without one is
