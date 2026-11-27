@@ -1,11 +1,13 @@
 import type { CollectionConfig, Config } from 'payload'
 
 import type { IsAdmin } from './lib/access.js'
+import type { RoundMoney } from './lib/money.js'
 import type { EcommerceCustomConfig, EcommerceSlugs } from './lib/slugs.js'
 
 import { createCarts, createCategories, createCoupons, createOrders, createProducts } from './collections/index.js'
 import { createEcommerceAccess, defaultIsAdmin } from './lib/access.js'
 import { createDeleteExpiredCartsTask, DELETE_EXPIRED_CARTS_TASK_SLUG } from './lib/cartExpiry.js'
+import { roundToTwoDecimals } from './lib/money.js'
 import { DEFAULT_ECOMMERCE_SLUGS, ECOMMERCE_CUSTOM_KEY } from './lib/slugs.js'
 
 /**
@@ -23,6 +25,10 @@ export { createEcommerceAccess, defaultIsAdmin } from './lib/access.js'
 export type { EcommerceAccess, IsAdmin } from './lib/access.js'
 export { ECOMMERCE_CUSTOM_KEY, getEcommerceSlugs } from './lib/slugs.js'
 export type { EcommerceSlugs } from './lib/slugs.js'
+export { toDocumentId } from './lib/ids.js'
+export { getRoundMoney, roundToTwoDecimals } from './lib/money.js'
+export type { RoundMoney } from './lib/money.js'
+export type { OrderAddress } from './lib/orders.js'
 export { isSameCartLine } from './lib/cart.js'
 export { getRelationshipId, isSameDocument } from './lib/relationships.js'
 export type { DocumentId } from './lib/relationships.js'
@@ -74,6 +80,14 @@ export type PayloadEcommerceConfig = {
    * option, for example `isAdmin: ({ req }) => req.user?.collection === 'admins'`.
    */
   isAdmin?: IsAdmin
+
+  /**
+   * Rounds the amounts the plugin calculates (a coupon's discount, the result of the
+   * `calculateTax` hook and an order's total) to the smallest unit you charge in.
+   * Default: two decimals, for prices in major units (19.99). When your prices are integer
+   * minor units (1999 cents), pass `Math.round` so 10% of 1995 becomes 200, not 199.5.
+   */
+  roundMoney?: RoundMoney
 
   /**
    * Slug of the upload collection that product `images` relate to. Default: `'media'`.
@@ -140,6 +154,7 @@ export const payloadEcommerce =
       disabled = false,
       isAdmin = defaultIsAdmin,
       mediaCollection = DEFAULT_ECOMMERCE_SLUGS.media,
+      roundMoney = roundToTwoDecimals,
       userCollection = DEFAULT_ECOMMERCE_SLUGS.users,
     } = pluginOptions
 
@@ -198,9 +213,11 @@ export const payloadEcommerce =
       collections.coupons,
     ]
 
-    // The server helpers (`useEcommerce`, `deleteExpiredCarts`) read the slugs from here.
-    // Recorded also when the plugin is disabled, because the collections still exist.
-    const customConfig: EcommerceCustomConfig = { slugs }
+    // The server helpers (`useEcommerce`, `deleteExpiredCarts`) read the slugs from here,
+    // and hooks and helpers the money rounding. Recorded also when the plugin is disabled,
+    // because the collections still exist. `custom` is never sent to the browser, so it
+    // can hold a function.
+    const customConfig: EcommerceCustomConfig = { roundMoney, slugs }
     config.custom = { ...config.custom, [ECOMMERCE_CUSTOM_KEY]: customConfig }
 
     if (disabled) {

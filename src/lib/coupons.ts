@@ -2,9 +2,12 @@ import type { Payload, PayloadRequest } from 'payload'
 
 import type { HelperAccessOptions } from './access.js'
 import type { DocumentId } from './relationships.js'
+import type { EcommerceSlugs } from './slugs.js'
 
 import { resolveLocalApiAccess } from './access.js'
 import { adjustCouponUsage } from './atomic.js'
+import { toDocumentId } from './ids.js'
+import { getRoundMoney } from './money.js'
 import { isSameDocument } from './relationships.js'
 
 export interface ValidateCouponParams {
@@ -22,7 +25,8 @@ export interface ValidateCouponParams {
 export interface ApplyCouponResult {
   valid: boolean
   /**
-   * Amount to take off the subtotal. Never more than `cartTotal`, and 0 for a free
+   * Amount to take off the subtotal, rounded with the plugin's `roundMoney` option (two
+   * decimals by default). Never more than `cartTotal`, and 0 for a free
    * shipping coupon, whose effect is reported by `freeShipping` instead.
    */
   discount: number
@@ -165,17 +169,20 @@ export const evaluateCoupon = async (
 
   // A fixed coupon worth more than the cart, or a percentage above 100, takes the
   // subtotal down to 0 at most; it never turns into credit against tax or shipping.
-  discount = Math.min(Math.max(0, discount), Math.max(0, cartTotal))
+  // The amount is rounded to the shop's money unit before it is capped, so that rounding
+  // up can never make the discount larger than the cart.
+  discount = Math.min(Math.max(0, getRoundMoney(payload)(discount)), Math.max(0, cartTotal))
 
   return { valid: true, discount, freeShipping: false, coupon }
 }
 
 export const createCouponHelpers = (
   payload: Payload,
-  couponsSlug = 'coupons',
-  ordersSlug = 'orders',
+  slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
 ) => {
+  const couponsSlug = slugs.coupons
+  const ordersSlug = slugs.orders
   // Coupons are readable by admins only, and these helpers are how everyone else gets a
   // code checked, so they always bypass access control.
   const { trusted } = resolveLocalApiAccess(accessOptions)
@@ -207,7 +214,13 @@ export const createCouponHelpers = (
   }: ValidateCouponParams): Promise<ApplyCouponResult> => {
     const coupon = await findCouponByCode(code)
 
-    return await evaluateCoupon(payload, coupon, { ...params, ordersSlug, req: trusted.req })
+    return await evaluateCoupon(payload, coupon, {
+      ...params,
+      ordersSlug,
+      req: trusted.req,
+      // An id that arrived as text has to match the type of the stored `user` to be counted.
+      userId: toDocumentId(payload, slugs.users, params.userId),
+    })
   }
 
   const applyCoupon = async (
@@ -226,7 +239,8 @@ export const createCouponHelpers = (
    * coupon does not exist. The orders collection calls this for every order created with a
    * coupon, so call it yourself only for uses that are not orders.
    */
-  const incrementCouponUsage = async (couponId: DocumentId, options: { req?: PayloadRequest } = {}) => {
+  const incrementCouponUsage = async (id: DocumentId, options: { req?: PayloadRequest } = {}) => {
+    const couponId = toDocumentId(payload, couponsSlug, id)
     const counted = await adjustCouponUsage(payload, {
       couponId,
       couponsSlug,
@@ -251,7 +265,8 @@ export const createCouponHelpers = (
    * Gives back one use of a coupon (never below 0) and returns the coupon. The orders
    * collection calls this when an order with a coupon is cancelled or refunded.
    */
-  const decrementCouponUsage = async (couponId: DocumentId, options: { req?: PayloadRequest } = {}) => {
+  const decrementCouponUsage = async (id: DocumentId, options: { req?: PayloadRequest } = {}) => {
+    const couponId = toDocumentId(payload, couponsSlug, id)
     await adjustCouponUsage(payload, { couponId, couponsSlug, delta: -1, req: options.req ?? trusted.req })
 
     return await payload.findByID({

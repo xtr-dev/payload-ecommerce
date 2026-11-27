@@ -118,10 +118,10 @@ describe('renamed collections', () => {
       data: {
         categories: [category.id],
         inventory: { quantity: 5, trackQuantity: true },
-        price: 10,
+        price: 1000,
         status: 'active',
         title: 'Renamed Product',
-        variants: [{ name: 'Large', inventory: 4, price: 12 }],
+        variants: [{ name: 'Large', inventory: 4, price: 1200 }],
       },
     })
     const coupon = await payload.create({
@@ -140,22 +140,30 @@ describe('renamed collections', () => {
     await ecommerce.cart.addToCart({ productId: product.id, quantity: 2, sessionId })
     const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId, variant: 'Large' })
     // The cart's subtotal hook loaded the product from the renamed products collection.
-    expect(cart.subtotal).toBe(32)
+    expect(cart.subtotal).toBe(3200)
     expect((await ecommerce.cart.getCart(undefined, sessionId))?.id).toBe(cart.id)
 
     const preview = await ecommerce.coupons.validateCoupon({
-      cartTotal: 32,
+      cartTotal: 3200,
       categoryIds: [category.id],
       code: 'RENAMED10',
       productIds: [product.id],
     })
-    expect(preview).toMatchObject({ discount: 3.2, valid: true })
+    expect(preview).toMatchObject({ discount: 320, valid: true })
 
     const order = await ecommerce.orders.createOrderFromCart({
       cartId: cart.id,
       orderData: { couponCode: 'renamed10', shippingAddress: address },
     })
-    expect(order).toMatchObject({ couponUsageCounted: true, discount: 3.2, inventoryReduced: true, subtotal: 32, total: 28.8 })
+    // 21% tax on 3200 − 320 = 604.8, stored as 605 cents.
+    expect(order).toMatchObject({
+      couponUsageCounted: true,
+      discount: 320,
+      inventoryReduced: true,
+      subtotal: 3200,
+      tax: 605,
+      total: 3485,
+    })
     expect((await ecommerce.orders.getOrder(order.id)).id).toBe(order.id)
 
     const afterOrder = await ecommerce.products.getProduct(product.id)
@@ -236,6 +244,49 @@ describe('renamed collections', () => {
     await payload.jobs.queue({ input: {}, task: DELETE_EXPIRED_CARTS_TASK_SLUG as never })
     await payload.jobs.run()
     expect(await exists(third.id)).toBe(false)
+  })
+})
+
+describe('integer cents with roundMoney: Math.round', () => {
+  test('discount, tax and total of an order are whole cents', async () => {
+    const ecommerce = useEcommerce(payload)
+    const product = await payload.create({
+      collection: 'shop-products',
+      data: { price: 1995, status: 'active', title: 'Cents Product' },
+    })
+    await payload.create({
+      collection: 'vouchers',
+      data: { code: 'CENTS10', status: 'active', type: 'percentage', value: 10 },
+    })
+
+    // 10% of 1995 is 199.5: the preview and the order both round it to 200.
+    const preview = await ecommerce.coupons.validateCoupon({ cartTotal: 1995, code: 'CENTS10' })
+    expect(preview.discount).toBe(200)
+
+    const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId: 'cents-session' })
+    const order = await ecommerce.orders.createOrderFromCart({
+      cartId: cart.id,
+      orderData: { couponCode: 'CENTS10', shipping: 495, shippingAddress: address },
+    })
+
+    // Tax: 21% of 1995 − 200 = 376.95, stored as 377.
+    expect(order).toMatchObject({ discount: 200, shipping: 495, subtotal: 1995, tax: 377, total: 2667 })
+    for (const amount of [order.discount, order.tax, order.total]) {
+      expect(Number.isInteger(amount)).toBe(true)
+    }
+
+    // The same total, shown before the order exists.
+    expect(ecommerce.orders.calculateTotal({ discount: 200, shipping: 495, subtotal: 1995, tax: 376.95 })).toBe(2667)
+  })
+
+  test('a rounded discount is never more than the cart total', async () => {
+    await payload.create({
+      collection: 'vouchers',
+      data: { code: 'CENTSALL', status: 'active', type: 'percentage', value: 100 },
+    })
+    const preview = await useEcommerce(payload).coupons.validateCoupon({ cartTotal: 0.4, code: 'CENTSALL' })
+
+    expect(preview.discount).toBe(0)
   })
 })
 

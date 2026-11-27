@@ -3,9 +3,11 @@ import type { Payload, Where } from 'payload'
 import type { HelperAccessOptions } from './access.js'
 import type { DeleteExpiredCartsOptions } from './cartExpiry.js'
 import type { DocumentId } from './relationships.js'
+import type { EcommerceSlugs } from './slugs.js'
 
 import { resolveLocalApiAccess } from './access.js'
 import { deleteExpiredCarts, isCartExpired } from './cartExpiry.js'
+import { toDocumentId } from './ids.js'
 
 import { isSameDocument } from './relationships.js'
 
@@ -53,9 +55,15 @@ export const isSameCartLine = (
 
 export const createCartHelpers = (
   payload: Payload,
-  cartsSlug = 'carts',
+  slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
 ) => {
+  const cartsSlug = slugs.carts
+  // Ids passed to the helpers may arrive as text (from a URL or a JSON body); each is
+  // converted to the id type of its collection before it is stored or used in a query.
+  const cartIdOf = (id: DocumentId): DocumentId => toDocumentId(payload, cartsSlug, id)
+  const productIdOf = (id: DocumentId): DocumentId => toDocumentId(payload, slugs.products, id)
+
   // Every cart read and write is made on behalf of the caller, so with
   // `overrideAccess: false` a user only reaches their own cart.
   const { caller } = resolveLocalApiAccess(accessOptions)
@@ -70,7 +78,9 @@ export const createCartHelpers = (
       throw new Error('Either userId or sessionId is required')
     }
 
-    const owner: Where = userId ? { user: { equals: userId } } : { sessionId: { equals: sessionId } }
+    const owner: Where = userId
+      ? { user: { equals: toDocumentId(payload, slugs.users, userId) } }
+      : { sessionId: { equals: sessionId } }
 
     const { docs } = await payload.find({
       ...caller,
@@ -100,7 +110,7 @@ export const createCartHelpers = (
   const loadActiveCart = async (cartId: DocumentId) => {
     const cart = await payload.findByID({
       ...caller,
-      id: cartId,
+      id: cartIdOf(cartId),
       collection: cartsSlug,
       disableErrors: true,
     })
@@ -118,12 +128,13 @@ export const createCartHelpers = (
    * 30 days from now.
    */
   const addToCart = async ({
-    productId,
+    productId: givenProductId,
     quantity,
     variant,
     userId,
     sessionId,
   }: AddToCartParams) => {
+    const productId = productIdOf(givenProductId)
     let cart = await findActiveCart(userId, sessionId)
 
     if (cart) {
@@ -147,7 +158,7 @@ export const createCartHelpers = (
         ...caller,
         collection: cartsSlug,
         data: {
-          user: userId,
+          user: toDocumentId(payload, slugs.users, userId),
           sessionId,
           items: [{ product: productId, variant, quantity }],
         },
@@ -181,7 +192,7 @@ export const createCartHelpers = (
     return await payload.update({
       ...caller,
       collection: cartsSlug,
-      id: cartId,
+      id: cartIdOf(cartId),
       data: { items },
     })
   }
@@ -198,7 +209,7 @@ export const createCartHelpers = (
     return await payload.update({
       ...caller,
       collection: cartsSlug,
-      id: cartId,
+      id: cartIdOf(cartId),
       data: { items },
     })
   }
@@ -214,7 +225,7 @@ export const createCartHelpers = (
     return await payload.update({
       ...caller,
       collection: cartsSlug,
-      id: cartId,
+      id: cartIdOf(cartId),
       data: { items: [] },
     })
   }

@@ -2,9 +2,11 @@ import type { Payload, PayloadRequest } from 'payload'
 
 import type { HelperAccessOptions } from './access.js'
 import type { DocumentId } from './relationships.js'
+import type { EcommerceSlugs } from './slugs.js'
 
 import { resolveLocalApiAccess } from './access.js'
 import { adjustStock } from './atomic.js'
+import { toDocumentId } from './ids.js'
 
 export interface GetProductsParams {
   category?: DocumentId
@@ -74,9 +76,12 @@ export const describeStockShortage = (
 
 export const createProductHelpers = (
   payload: Payload,
-  productsSlug = 'products',
+  slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
 ) => {
+  const productsSlug = slugs.products
+  /** A product id in the type the products collection stores, also when it arrived as text. */
+  const productIdOf = (id: DocumentId): DocumentId => toDocumentId(payload, productsSlug, id)
   // getProduct and getProducts read on behalf of the caller; the inventory helpers are
   // stock bookkeeping and always bypass access control.
   const { caller, trusted } = resolveLocalApiAccess(accessOptions)
@@ -85,7 +90,7 @@ export const createProductHelpers = (
     return await payload.findByID({
       ...caller,
       collection: productsSlug,
-      id,
+      id: productIdOf(id),
       depth: 2,
     })
   }
@@ -96,7 +101,7 @@ export const createProductHelpers = (
     const where: any = {}
 
     if (category) {
-      where.categories = { contains: category }
+      where.categories = { contains: toDocumentId(payload, slugs.categories, category) }
     }
 
     if (status) {
@@ -148,7 +153,7 @@ export const createProductHelpers = (
   const loadProduct = async (productId: DocumentId, req?: PayloadRequest) => {
     const product = await payload.findByID({
       ...trusted,
-      id: productId,
+      id: productIdOf(productId),
       collection: productsSlug,
       depth: 0,
       disableErrors: true,
@@ -198,7 +203,7 @@ export const createProductHelpers = (
 
     const reduced = await adjustStock(payload, {
       delta: -quantity,
-      productId,
+      productId: productIdOf(productId),
       productsSlug,
       req: options.req ?? trusted.req,
       variant: target.variant,
@@ -230,7 +235,7 @@ export const createProductHelpers = (
 
     await adjustStock(payload, {
       delta: quantity,
-      productId,
+      productId: productIdOf(productId),
       productsSlug,
       req: options.req ?? trusted.req,
       variant: target.variant,

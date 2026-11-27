@@ -51,6 +51,7 @@ The plugin adds the five collections below. Orders and carts relate to your user
 | `userCollection` | `'users'` | Auth collection the `user` field of orders and carts relates to, and whose users own their carts and orders |
 | `mediaCollection` | `'media'` | Upload collection product `images` relate to |
 | `isAdmin` | `role === 'admin'` or `roles` includes `'admin'` | Who manages the shop (see [Access control](#access-control)) |
+| `roundMoney` | two decimals | Rounds the discount, tax and total the plugin calculates; pass `Math.round` for integer cents (see [Money](#money)) |
 | `cartCleanupTask` | `false` | Registers the jobs task that deletes expired carts (see [Carts](#carts-1)) |
 | `hooks.calculateTax` | – | Returns the tax of an order (see [Tax Configuration](#tax-configuration)) |
 | `hooks.beforeCreateOrder` | – | Receives and returns the data of a new order, after coupon and tax and before the total is computed |
@@ -111,7 +112,8 @@ payloadEcommerce({
 
 ### Orders
 - Order number, items, subtotal, discount, tax, shipping and a computed total
-- Shipping and billing addresses
+- A shipping address (first name, last name, address line, city and country are required; `state` and `postalCode` are optional, since not every country has them) and an optional billing address
+- An optional `user`, and a `customerEmail` to reach the customer of a guest order
 - Status: pending | processing | shipped | delivered | cancelled | refunded
 - Payment fields (`paymentStatus`, `paymentMethod`, `paymentId`) that your payment integration sets; the plugin takes no payments and sends no emails
 - Moving an order to cancelled or refunded puts its stock and coupon use back
@@ -170,7 +172,7 @@ const result = await ecommerce.coupons.validateCoupon({
 })
 ```
 
-Document ids are strings on MongoDB and numbers on SQLite and Postgres; every helper accepts both. A relationship field holds either a bare id or the populated document, depending on `depth`. Use the exported `getRelationshipId` to read the id in both cases:
+Document ids are strings on MongoDB and numbers on SQLite and Postgres. Every helper accepts both, and converts an id to the type its collection uses, so a numeric id that arrives as text (`'5'` from a URL, a form or a JSON body) works on SQL databases. `toDocumentId(payload, collectionSlug, id)` is exported for your own Local API calls. A relationship field holds either a bare id or the populated document, depending on `depth`. Use the exported `getRelationshipId` to read the id in both cases:
 
 ```typescript
 import { getRelationshipId } from '@xtr-dev/payload-ecommerce'
@@ -193,6 +195,36 @@ await ecommerce.orders.getOrder(orderId)    // throws unless it is their order
 ```
 
 In that mode cart, order and product reads, cart changes and `updateOrderStatus` run as that user. `createOrderFromCart` reads the cart as the user, so it only works on their own cart, and then creates the order with full access. Coupon validation and the inventory helpers always run with full access. A `req` passed without `overrideAccess: false` is only used to join its transaction.
+
+### Guest checkout
+
+A cart belongs to a user (`userId`) or to a guest session (`sessionId`, any string you keep in a cookie). An order created from a guest cart has no `user`, so pass the address to reach the customer at:
+
+```typescript
+const cart = await ecommerce.cart.addToCart({ sessionId, productId, quantity: 1 })
+
+const order = await ecommerce.orders.createOrderFromCart({
+  cartId: cart.id,
+  orderData: {
+    customerEmail: 'guest@example.com', // stored on the order as `customerEmail`
+    shippingAddress: { firstName, lastName, address1, city, country }, // state and postalCode optional
+  },
+})
+```
+
+`customerEmail` is optional and can also be set on the order of a signed-in user. The billing address defaults to the shipping address. Guest carts and guest orders are only reachable through these helpers or as an admin (see [Access control](#access-control)).
+
+### Money
+
+The plugin stores amounts as plain numbers and does not care whether they are major units (`19.99`) or integer minor units (`1999` cents), as long as you use one of them everywhere. What it calculates itself — a coupon's discount, the result of your `calculateTax` hook and the order total — it rounds with the `roundMoney` option:
+
+```typescript
+payloadEcommerce({
+  roundMoney: Math.round, // prices in integer cents: 10% of 1995 is 200, not 199.5
+})
+```
+
+The default rounds to two decimals, which suits prices in major units. Amounts you pass in yourself (prices, `shipping`, a manual `discount`) are stored as given. `getRoundMoney(payload)` returns the configured function.
 
 ### Prices
 
@@ -297,7 +329,7 @@ A coupon is applied by the plugin when an order is created with it. Pass the cou
 
 1. Checks the coupon against the order: status `active`, within `validFrom`/`validUntil`, `usageCount` below `usageLimit`, the customer's earlier orders with this coupon (cancelled and refunded ones excluded) below `customerLimit` (only for orders with a `user`), `subtotal` at least `minPurchase`, and at least one order item matching `appliesToProducts` / `appliesToCategories` when those are set. A limit of 0 or an empty restriction means no limit.
 2. Rejects the order with a validation error on `coupon` when a check fails.
-3. Sets `discount` — a percentage of the subtotal (capped by `maxDiscount`) or the fixed amount, never more than the subtotal. A `discount` passed together with a coupon is ignored.
+3. Sets `discount` — a percentage of the subtotal (capped by `maxDiscount`) or the fixed amount, rounded with [`roundMoney`](#money) and never more than the subtotal. A `discount` passed together with a coupon is ignored.
 4. Sets `shipping` to 0 for a `freeShipping` coupon (its `discount` is 0).
 5. Increments the coupon's `usageCount`, and gives that use back when the order is cancelled or refunded (see "Inventory and Order Side Effects").
 
@@ -328,10 +360,11 @@ An order's `total` is always computed by the plugin when the order is saved:
 total = subtotal − discount + tax + shipping
 ```
 
-- `tax` comes from the `calculateTax` hook when one is configured (a negative result is stored as 0). Without the hook it is the `tax` passed by the caller, or 0. A hook that fails makes the order fail (see [Tax Configuration](#tax-configuration)).
+- `tax` comes from the `calculateTax` hook when one is configured (rounded with [`roundMoney`](#money); a negative result is stored as 0). Without the hook it is the `tax` passed by the caller, or 0. A hook that fails makes the order fail (see [Tax Configuration](#tax-configuration)).
 - The total is never negative: a discount larger than the rest of the order gives 0.
 - A `total` passed by the caller is ignored, so it can be left out. On update, tax is recalculated only when the items, `subtotal`, `discount`, `shipping` or an address actually differ from the stored order, and the total only when an amount differs. A status or tracking update, or re-saving an unchanged order in the admin UI, leaves both as they were.
-- `calculateOrderTotal({ subtotal, discount, tax, shipping })` is exported for showing the same total before the order exists (for example on a cart page). It removes floating point noise but does not round to currency minor units.
+- The total is rounded with [`roundMoney`](#money).
+- To show the same total before the order exists (for example on a cart page), use `ecommerce.orders.calculateTotal({ subtotal, discount, tax, shipping })`, which rounds the same way. The exported `calculateOrderTotal(parts, roundMoney?)` is the function behind it; without its second argument it only removes floating point noise.
 
 ## Tax Configuration
 
@@ -348,7 +381,8 @@ payloadEcommerce({
       const taxableAmount = subtotal - discount
       const taxRate = 0.10 // 10%
 
-      return Math.round(taxableAmount * taxRate * 100) / 100
+      // No need to round: the plugin rounds the result with `roundMoney`
+      return taxableAmount * taxRate
     },
   },
 })

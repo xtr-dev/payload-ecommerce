@@ -13,6 +13,9 @@ import { fileURLToPath } from 'url'
  * called `products`, `orders`, `carts`, `coupons`, `categories`, `users` or `media`, so
  * any place in the plugin that still assumes a default slug fails here.
  *
+ * This shop also keeps its prices in integer cents, the way a host with `roundMoney:
+ * Math.round` does, and charges 21% tax that is deliberately not rounded by its hook.
+ *
  * It uses its own database next to the one of dev/payload.config.ts, derived from the same
  * DATABASE_URI, so both test files can run at the same time.
  */
@@ -56,7 +59,11 @@ export default buildConfig({
         }),
         products: 'shop-products',
       },
+      hooks: {
+        calculateTax: ({ discount, subtotal }) => (subtotal - discount) * 0.21,
+      },
       mediaCollection: 'uploads',
+      roundMoney: Math.round,
       userCollection: 'customers',
     }),
   ],

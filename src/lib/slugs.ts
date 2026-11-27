@@ -32,6 +32,8 @@ export const DEFAULT_ECOMMERCE_SLUGS: EcommerceSlugs = {
 export const ECOMMERCE_CUSTOM_KEY = 'payload-ecommerce'
 
 export interface EcommerceCustomConfig {
+  /** See `getRoundMoney` in money.ts. */
+  roundMoney: (amount: number) => number
   slugs: EcommerceSlugs
 }
 

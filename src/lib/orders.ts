@@ -2,38 +2,44 @@ import type { Payload } from 'payload'
 
 import type { HelperAccessOptions } from './access.js'
 import type { DocumentId } from './relationships.js'
+import type { EcommerceSlugs } from './slugs.js'
+import type { OrderTotalParts } from './totals.js'
 
 import { resolveLocalApiAccess } from './access.js'
 import { isCartExpired } from './cartExpiry.js'
 import { createCouponHelpers } from './coupons.js'
+import { toDocumentId } from './ids.js'
+import { getRoundMoney } from './money.js'
 import { resolveUnitPrice } from './pricing.js'
 import { getRelationshipId } from './relationships.js'
+import { calculateOrderTotal } from './totals.js'
+
+/** An order's shipping or billing address. */
+export interface OrderAddress {
+  firstName: string
+  lastName: string
+  address1: string
+  address2?: string
+  city: string
+  /** State or province; leave out for countries that do not use one. */
+  state?: string
+  /** Leave out for countries without postal codes. */
+  postalCode?: string
+  country: string
+  phone?: string
+}
 
 export interface CreateOrderFromCartParams {
   cartId: DocumentId
   orderData?: {
-    shippingAddress: {
-      firstName: string
-      lastName: string
-      address1: string
-      address2?: string
-      city: string
-      state: string
-      postalCode: string
-      country: string
-      phone?: string
-    }
-    billingAddress?: {
-      firstName: string
-      lastName: string
-      address1: string
-      address2?: string
-      city: string
-      state: string
-      postalCode: string
-      country: string
-      phone?: string
-    }
+    shippingAddress: OrderAddress
+    /** Defaults to the shipping address. */
+    billingAddress?: OrderAddress
+    /**
+     * Email address to reach the customer at, stored on the order as `customerEmail`.
+     * Pass it for a guest cart, whose order has no user to look an address up from.
+     */
+    customerEmail?: string
     paymentMethod?: string
     notes?: string
     subtotal?: number
@@ -49,28 +55,8 @@ export interface CreateOrderFromCartParams {
     paymentStatus?: string
   }
   // Legacy parameters for backward compatibility
-  shippingAddress?: {
-    firstName: string
-    lastName: string
-    address1: string
-    address2?: string
-    city: string
-    state: string
-    postalCode: string
-    country: string
-    phone?: string
-  }
-  billingAddress?: {
-    firstName: string
-    lastName: string
-    address1: string
-    address2?: string
-    city: string
-    state: string
-    postalCode: string
-    country: string
-    phone?: string
-  }
+  shippingAddress?: OrderAddress
+  billingAddress?: OrderAddress
   paymentMethod?: string
   notes?: string
 }
@@ -84,12 +70,10 @@ export interface UpdateOrderStatusParams {
 
 export const createOrderHelpers = (
   payload: Payload,
-  ordersSlug = 'orders',
-  cartsSlug = 'carts',
-  productsSlug = 'products',
-  couponsSlug = 'coupons',
+  slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
 ) => {
+  const { carts: cartsSlug, orders: ordersSlug, products: productsSlug } = slugs
   const { caller, trusted } = resolveLocalApiAccess(accessOptions)
 
   /**
@@ -102,7 +86,9 @@ export const createOrderHelpers = (
    * through the API) and emptying the cart.
    */
   const createOrderFromCart = async (params: CreateOrderFromCartParams) => {
-    const { cartId, orderData } = params
+    const { orderData } = params
+    // Ids may arrive as text (from a URL or a JSON body); see toDocumentId.
+    const cartId = toDocumentId(payload, cartsSlug, params.cartId)
 
     // Support both new orderData structure and legacy parameters
     const shippingAddress = orderData?.shippingAddress || params.shippingAddress
@@ -182,9 +168,9 @@ export const createOrderHelpers = (
 
     // The coupon's rules, discount and free shipping are applied by the orders collection
     // when the order is created; here a code only has to be turned into the coupon's id.
-    let couponId = orderData?.coupon
+    let couponId = toDocumentId(payload, slugs.coupons, orderData?.coupon)
     if (couponId === undefined && orderData?.couponCode) {
-      const coupon = await createCouponHelpers(payload, couponsSlug, ordersSlug, accessOptions).findCouponByCode(
+      const coupon = await createCouponHelpers(payload, slugs, accessOptions).findCouponByCode(
         orderData.couponCode,
       )
       if (!coupon) {
@@ -198,7 +184,8 @@ export const createOrderHelpers = (
       ...trusted,
       collection: ordersSlug,
       data: {
-        user: cart.user || undefined,
+        user: getRelationshipId(cart.user),
+        customerEmail: orderData?.customerEmail,
         items,
         subtotal,
         tax,
@@ -243,7 +230,7 @@ export const createOrderHelpers = (
     return await payload.update({
       ...caller,
       collection: ordersSlug,
-      id: orderId,
+      id: toDocumentId(payload, ordersSlug, orderId),
       data: updateData,
     })
   }
@@ -252,7 +239,7 @@ export const createOrderHelpers = (
     return await payload.findByID({
       ...caller,
       collection: ordersSlug,
-      id: orderId,
+      id: toDocumentId(payload, ordersSlug, orderId),
       depth: 2,
     })
   }
@@ -263,7 +250,7 @@ export const createOrderHelpers = (
       collection: ordersSlug,
       where: {
         user: {
-          equals: userId,
+          equals: toDocumentId(payload, slugs.users, userId),
         },
       },
       sort: '-createdAt',
@@ -271,7 +258,16 @@ export const createOrderHelpers = (
     })
   }
 
+  /**
+   * The total an order with these amounts will get: subtotal − discount + tax + shipping,
+   * never negative, rounded with the plugin's `roundMoney` option. Use it to show a total
+   * before the order exists, for example on a cart or checkout page.
+   */
+  const calculateTotal = (parts: OrderTotalParts): number =>
+    calculateOrderTotal(parts, getRoundMoney(payload))
+
   return {
+    calculateTotal,
     createOrderFromCart,
     updateOrderStatus,
     getOrder,
