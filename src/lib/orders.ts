@@ -2,6 +2,7 @@ import type { Payload } from 'payload'
 
 import type { DocumentId } from './relationships.js'
 
+import { isCartExpired } from './cartExpiry.js'
 import { createCouponHelpers } from './coupons.js'
 import { getRelationshipId } from './relationships.js'
 
@@ -102,7 +103,14 @@ export const createOrderHelpers = (
       collection: cartsSlug,
       id: cartId,
       depth: 2,
+      disableErrors: true,
     })
+
+    // An expired cart is treated as absent everywhere, but gets its own message here so a
+    // checkout can tell the customer why the order was not placed.
+    if (cart && isCartExpired(cart)) {
+      throw new Error('Cart has expired')
+    }
 
     if (!cart || !cart.items || cart.items.length === 0) {
       throw new Error('Cart is empty or not found')

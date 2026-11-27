@@ -164,6 +164,30 @@ payloadEcommerce({
 })
 ```
 
+## Carts
+
+A cart belongs to a user (`userId`) or a guest session (`sessionId`) and expires 30 days after it was last changed: every change to a cart moves `expiresAt` to 30 days from now, unless the change sets `expiresAt` itself.
+
+The cart helpers treat an expired cart as absent: `getCart` returns `null`, `addToCart` starts a new cart, `updateCartItem` / `removeFromCart` / `clearCart` throw `Cart not found`, and `createOrderFromCart` throws `Cart has expired`.
+
+Expired carts stay in the database until you delete them. Nothing does that on its own; pick one:
+
+```typescript
+import { deleteExpiredCarts } from '@xtr-dev/payload-ecommerce'
+
+// From your own cron job, script or endpoint
+const { deleted } = await deleteExpiredCarts(payload)
+```
+
+```typescript
+// Or as a Payload jobs task: opt in, then queue it from your schedule
+payloadEcommerce({ cartCleanupTask: true })
+
+await payload.jobs.queue({ task: 'ecommerce-delete-expired-carts', input: {} })
+```
+
+The task is only registered, not scheduled, and it runs when your jobs runner processes the queue (`jobs.autoRun`, `payload jobs:run` or `payload.jobs.run()`).
+
 ## Coupons
 
 A coupon is applied by the plugin when an order is created with it. Pass the coupon's id as `coupon` (or its code as `orderData.couponCode` to `createOrderFromCart`); the orders collection then:
