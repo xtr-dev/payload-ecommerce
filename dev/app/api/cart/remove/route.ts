@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
-import { resolveUnitPrice } from 'payload-ecommerce';
+import { isSameCartLine, resolveUnitPrice } from 'payload-ecommerce';
 
 export async function POST(request: Request) {
   try {
@@ -37,10 +37,7 @@ export async function POST(request: Request) {
     const cart = carts[0];
 
     // Remove item manually
-    const items = (cart.items || []).filter((item: any) => {
-      const itemProductId = typeof item.product === 'object' ? item.product.id : item.product;
-      return !(itemProductId === productId && (variant ? item.variant === variant : !item.variant));
-    });
+    const items = (cart.items || []).filter((item: any) => !isSameCartLine(item, productId, variant));
 
     // Calculate subtotal
     const cartWithDetails = await payload.findByID({
@@ -52,11 +49,7 @@ export async function POST(request: Request) {
     let subtotal = 0;
     for (const item of items) {
       // Find the product details from the fetched cart
-      const cartItem = cartWithDetails.items?.find((ci: any) => {
-        const ciProductId = typeof ci.product === 'object' ? ci.product.id : ci.product;
-        const itemProductId = typeof item.product === 'object' ? item.product.id : item.product;
-        return ciProductId === itemProductId && ci.variant === item.variant;
-      });
+      const cartItem = cartWithDetails.items?.find((ci: any) => isSameCartLine(ci, item.product, item.variant));
 
       if (cartItem) {
         const product = typeof cartItem.product === 'object' ? cartItem.product : null;

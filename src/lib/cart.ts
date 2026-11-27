@@ -18,14 +18,36 @@ export interface AddToCartParams {
 export interface UpdateCartItemParams {
   cartId: DocumentId
   productId: DocumentId
+  /** New quantity of the line; 0 or less removes the line. */
   quantity: number
+  /**
+   * Variant name of the line to change. Leave out to change the line that has no variant;
+   * it never matches a line that has one.
+   */
+  variant?: null | string
 }
 
 export interface RemoveFromCartParams {
   cartId: DocumentId
   productId: DocumentId
-  variant?: string
+  /**
+   * Variant name of the line to remove. Leave out to remove the line that has no variant;
+   * it never matches a line that has one.
+   */
+  variant?: null | string
 }
+
+/**
+ * Tells whether a cart line is the line for `productId` in `variant`. A cart holds one
+ * line per product + variant combination, so two variants of one product are two lines
+ * and the product alone does not identify a line. "No variant" is a combination of its
+ * own: an empty, null or missing variant only matches a line without a variant.
+ */
+export const isSameCartLine = (
+  item: { product?: unknown; variant?: null | string } | null | undefined,
+  productId: unknown,
+  variant?: null | string,
+): boolean => isSameDocument(item?.product, productId) && (item?.variant || null) === (variant || null)
 
 export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
   /**
@@ -94,10 +116,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
 
     if (cart) {
       const items = cart.items || []
-      const existingItemIndex = items.findIndex(
-        (item: any) =>
-          isSameDocument(item.product, productId) && (variant ? item.variant === variant : !item.variant),
-      )
+      const existingItemIndex = items.findIndex((item: any) => isSameCartLine(item, productId, variant))
 
       if (existingItemIndex >= 0) {
         items[existingItemIndex].quantity += quantity
@@ -124,11 +143,16 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     return cart
   }
 
-  const updateCartItem = async ({ cartId, productId, quantity }: UpdateCartItemParams) => {
+  /**
+   * Sets the quantity of the cart line for this product and variant, or removes the line
+   * when the quantity is 0 or less. Throws `Item not found in cart` when the cart has no
+   * line for exactly this product + variant combination.
+   */
+  const updateCartItem = async ({ cartId, productId, quantity, variant }: UpdateCartItemParams) => {
     const cart = await loadActiveCart(cartId)
 
     const items = cart.items || []
-    const itemIndex = items.findIndex((item: any) => isSameDocument(item.product, productId))
+    const itemIndex = items.findIndex((item: any) => isSameCartLine(item, productId, variant))
 
     if (itemIndex === -1) {
       throw new Error('Item not found in cart')
@@ -147,13 +171,14 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     })
   }
 
+  /**
+   * Removes the cart line for this product and variant. Other lines of the same product
+   * (other variants) stay. Does nothing when the cart has no such line.
+   */
   const removeFromCart = async ({ cartId, productId, variant }: RemoveFromCartParams) => {
     const cart = await loadActiveCart(cartId)
 
-    const items = (cart.items || []).filter(
-      (item: any) =>
-        !(isSameDocument(item.product, productId) && (variant ? item.variant === variant : !item.variant)),
-    )
+    const items = (cart.items || []).filter((item: any) => !isSameCartLine(item, productId, variant))
 
     return await payload.update({
       collection: cartsSlug,

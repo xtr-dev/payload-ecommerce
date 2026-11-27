@@ -12,6 +12,7 @@ import {
   deleteExpiredCarts,
   getRelationshipId,
   isCartExpired,
+  isSameCartLine,
   payloadEcommerce,
   resolveUnitPrice,
   slugify,
@@ -1309,6 +1310,119 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(stored.items[0]).toMatchObject({ price: 15, quantity: 2, total: 30, variant: 'Large' })
       expect(stored.items[1]).toMatchObject({ price: 10, quantity: 1, total: 10 })
       expect(stored.subtotal).toBe(40)
+    })
+  })
+
+  describe('cart lines are identified by product and variant', () => {
+    const createCartWithThreeLines = async (name: string) => {
+      const ecommerce = useEcommerce(payload)
+      const product = await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'active', title: `Cart Line Product ${name}`, variants: [{ name: 'Large' }, { name: 'Small' }] },
+      })
+      const sessionId = `cart-line-session-${name}`
+
+      // Insertion order matters: the variant lines come before the line without a variant,
+      // so matching on the product alone would pick the "Large" line.
+      await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId, variant: 'Large' })
+      await ecommerce.cart.addToCart({ productId: product.id, quantity: 2, sessionId, variant: 'Small' })
+      const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 3, sessionId })
+
+      return { cart, ecommerce, product }
+    }
+
+    const quantities = (cart: { items: Array<{ quantity: number; variant?: null | string }> }) =>
+      Object.fromEntries(cart.items.map((item) => [item.variant || 'none', item.quantity]))
+
+    test('isSameCartLine compares product and variant, treating an empty variant as none', () => {
+      expect(isSameCartLine({ product: 1, variant: 'Large' }, '1', 'Large')).toBe(true)
+      expect(isSameCartLine({ product: { id: 1 }, variant: 'Large' }, 1, 'Small')).toBe(false)
+      expect(isSameCartLine({ product: 1, variant: 'Large' }, 1)).toBe(false)
+      expect(isSameCartLine({ product: 1, variant: null }, 1, undefined)).toBe(true)
+      expect(isSameCartLine({ product: 1, variant: '' }, 1, null)).toBe(true)
+      expect(isSameCartLine({ product: 1 }, 1, 'Large')).toBe(false)
+      expect(isSameCartLine({ product: 2 }, 1)).toBe(false)
+    })
+
+    test('addToCart keeps one line per product and variant', async () => {
+      const { cart } = await createCartWithThreeLines('add')
+
+      expect(cart.items).toHaveLength(3)
+      expect(quantities(cart)).toEqual({ Large: 1, none: 3, Small: 2 })
+    })
+
+    test('updateCartItem changes only the line of the given variant', async () => {
+      const { cart, ecommerce, product } = await createCartWithThreeLines('update')
+
+      const updated = await ecommerce.cart.updateCartItem({
+        cartId: cart.id,
+        productId: product.id,
+        quantity: 7,
+        variant: 'Small',
+      })
+      expect(quantities(updated)).toEqual({ Large: 1, none: 3, Small: 7 })
+    })
+
+    test('updateCartItem without a variant changes the line that has no variant', async () => {
+      const { cart, ecommerce, product } = await createCartWithThreeLines('update-none')
+
+      const updated = await ecommerce.cart.updateCartItem({
+        cartId: cart.id,
+        productId: product.id,
+        quantity: 9,
+      })
+      expect(quantities(updated)).toEqual({ Large: 1, none: 9, Small: 2 })
+    })
+
+    test('updateCartItem with quantity 0 removes only the line of the given variant', async () => {
+      const { cart, ecommerce, product } = await createCartWithThreeLines('update-zero')
+
+      const updated = await ecommerce.cart.updateCartItem({
+        cartId: cart.id,
+        productId: product.id,
+        quantity: 0,
+        variant: 'Large',
+      })
+      expect(quantities(updated)).toEqual({ none: 3, Small: 2 })
+    })
+
+    test('updateCartItem throws when the cart has no line for that product and variant', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'active', title: 'Cart Line Product missing', variants: [{ name: 'Large' }] },
+      })
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'cart-line-session-missing',
+        variant: 'Large',
+      })
+
+      // The cart only holds the "Large" line, so neither "no variant" nor "Small" matches.
+      await expect(
+        ecommerce.cart.updateCartItem({ cartId: cart.id, productId: product.id, quantity: 2 }),
+      ).rejects.toThrow('Item not found in cart')
+      await expect(
+        ecommerce.cart.updateCartItem({ cartId: cart.id, productId: product.id, quantity: 2, variant: 'Small' }),
+      ).rejects.toThrow('Item not found in cart')
+
+      const unchanged = await payload.findByID({ id: cart.id, collection: 'carts' })
+      expect(unchanged.items[0].quantity).toBe(1)
+    })
+
+    test('removeFromCart removes only the line of the given variant', async () => {
+      const { cart, ecommerce, product } = await createCartWithThreeLines('remove')
+
+      const withoutSmall = await ecommerce.cart.removeFromCart({
+        cartId: cart.id,
+        productId: product.id,
+        variant: 'Small',
+      })
+      expect(quantities(withoutSmall)).toEqual({ Large: 1, none: 3 })
+
+      const withoutPlain = await ecommerce.cart.removeFromCart({ cartId: cart.id, productId: product.id })
+      expect(quantities(withoutPlain)).toEqual({ Large: 1 })
     })
   })
 

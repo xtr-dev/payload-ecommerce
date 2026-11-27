@@ -82,7 +82,8 @@ export const useCart = ({ serverURL = '' }: UseCartOptions = {}) => {
   )
 
   const updateCartItem = React.useCallback(
-    async (productId: string, quantity: number) => {
+    // `variant` selects the line when the cart holds several variants of one product.
+    async (productId: string, quantity: number, variant?: string) => {
       setLoading(true)
       setError(null)
       try {
@@ -92,7 +93,7 @@ export const useCart = ({ serverURL = '' }: UseCartOptions = {}) => {
             'Content-Type': 'application/json',
           },
           credentials: 'include',
-          body: JSON.stringify({ productId, quantity }),
+          body: JSON.stringify({ productId, quantity, variant }),
         })
         if (!response.ok) {
           throw new Error('Failed to update cart')
