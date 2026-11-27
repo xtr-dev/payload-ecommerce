@@ -11,7 +11,7 @@ export const slugify = (text: string): string =>
   text
     .normalize('NFKD')
     // Combining marks left behind by the decomposition above (the accent of "é").
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/\p{M}/gu, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
