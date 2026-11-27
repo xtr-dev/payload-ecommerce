@@ -12,6 +12,8 @@ export { useEcommerce } from './lib/useEcommerce.js'
 export type { EcommerceHelpers } from './lib/useEcommerce.js'
 export { getRelationshipId, isSameDocument } from './lib/relationships.js'
 export type { DocumentId } from './lib/relationships.js'
+export { calculateOrderTotal } from './lib/totals.js'
+export type { OrderTotalParts } from './lib/totals.js'
 
 export type PayloadEcommerceConfig = {
   collections?: {

@@ -163,6 +163,19 @@ payloadEcommerce({
 })
 ```
 
+## Order Totals
+
+An order's `total` is always computed by the plugin when the order is saved:
+
+```
+total = subtotal − discount + tax + shipping
+```
+
+- `tax` comes from the `calculateTax` hook when one is configured (a negative result is stored as 0). Without the hook it is the `tax` passed by the caller, or 0.
+- The total is never negative: a discount larger than the rest of the order gives 0.
+- A `total` passed by the caller is ignored, so it can be left out. On update, the total is recomputed when `subtotal`, `discount`, `tax` or `shipping` changes; tax is recalculated when the items, an amount or an address changes, and not on a status or tracking update.
+- `calculateOrderTotal({ subtotal, discount, tax, shipping })` is exported for showing the same total before the order exists (for example on a cart page). It removes floating point noise but does not round to currency minor units.
+
 ## Tax Configuration
 
 Configure automatic tax calculation using the `calculateTax` hook:
