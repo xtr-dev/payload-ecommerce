@@ -204,6 +204,9 @@ export default buildConfig({
   secret: process.env.PAYLOAD_SECRET || 'test-secret_key',
   sharp,
   typescript: {
+    // Types are regenerated explicitly with `pnpm generate:types`; generating them on every
+    // config load would rewrite dev/payload-types.ts during test and dev runs.
+    autoGenerate: false,
     outputFile: path.resolve(dirname, 'payload-types.ts'),
   },
 })

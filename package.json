@@ -50,9 +50,11 @@
     "lint": "eslint",
     "lint:fix": "eslint ./src --fix",
     "prepublishOnly": "pnpm clean && pnpm build",
-    "test": "pnpm test:int && pnpm test:e2e",
+    "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:int": "vitest"
+    "test:int": "vitest",
+    "test:pack": "pnpm build && sh scripts/verify-packed-exports.sh",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -70,6 +72,7 @@
     "@types/node": "^22.5.4",
     "@types/react": "19.1.8",
     "@types/react-dom": "19.1.6",
+    "@xtr-dev/payload-billing": "^0.6.0",
     "autoprefixer": "^10.4.20",
     "copyfiles": "2.4.1",
     "cross-env": "^7.0.3",
@@ -130,8 +133,5 @@
     ]
   },
   "registry": "https://registry.npmjs.org/",
-  "dependencies": {
-    "@xtr-dev/payload-billing": "^0.1.14"
-  },
   "packageManager": "pnpm@10.12.4+sha512.5ea8b0deed94ed68691c9bad4c955492705c5eeb8a87ef86bc62c74a26b037b08ff9570f108b2e4dbd1dd1a9186fea925e527f141c648e85af45631074680184"
 }

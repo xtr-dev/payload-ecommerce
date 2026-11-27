@@ -97,7 +97,7 @@ billingPlugin({
 
 ### Collection Extension
 
-The configuration demonstrates the new **collection extension** feature from `@xtr-dev/payload-billing@0.1.13`:
+The configuration demonstrates the new **collection extension** feature of `@xtr-dev/payload-billing` (the demo uses `^0.6.0`):
 
 - **Custom Fields**: Add an `order` relationship field to invoices to link them to ecommerce orders
 - **Custom Hooks**: Automatically populate invoice customer info and billing address from the associated order

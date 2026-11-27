@@ -66,7 +66,9 @@ export async function seedDatabase(payload: Payload) {
 
       // Download and create image if imageUrl is provided
       let imageId;
-      if ((product as any).imageUrl) {
+      // SEED_SKIP_IMAGES=true (set by vitest.config.js) keeps the test run off the network:
+      // the product images are downloaded from picsum.photos and no test needs them.
+      if ((product as any).imageUrl && process.env.SEED_SKIP_IMAGES !== 'true') {
         try {
           console.log(`Downloading image for ${product.title}...`);
           const imageResponse = await fetch((product as any).imageUrl);

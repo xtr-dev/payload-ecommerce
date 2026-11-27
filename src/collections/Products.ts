@@ -144,7 +144,7 @@ export const Products: CollectionConfig = {
   ],
   hooks: {
     beforeChange: [
-      async ({ data, operation }) => {
+      ({ data, operation }) => {
         if (operation === 'create' || operation === 'update') {
           if (data.title && !data.slug) {
             data.slug = data.title
@@ -157,7 +157,7 @@ export const Products: CollectionConfig = {
       },
     ],
     beforeValidate: [
-      async ({ data }) => {
+      ({ data }) => {
         if (data && data.price && data.compareAtPrice) {
           if (data.compareAtPrice < data.price) {
             data.compareAtPrice = undefined
