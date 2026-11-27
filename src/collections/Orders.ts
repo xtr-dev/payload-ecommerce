@@ -2,7 +2,7 @@ import type { CollectionConfig, PayloadRequest } from 'payload'
 import { ValidationError } from 'payload'
 import type { PayloadEcommerceConfig } from '../index.js'
 import { describeStockShortage, resolveStockTarget } from '../lib/products.js'
-import { adjustCouponUsage, adjustStock, hasActiveTransaction } from '../lib/atomic.js'
+import { adjustCouponUsage, adjustStock, claimOrderRelease, hasActiveTransaction } from '../lib/atomic.js'
 import { evaluateCoupon, RELEASED_ORDER_STATUSES } from '../lib/coupons.js'
 import type { DocumentId } from '../lib/relationships.js'
 import { getRelationshipId } from '../lib/relationships.js'
@@ -568,13 +568,15 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
             data.inventoryReduced = demand.length > 0
             data.couponUsageCounted = holds && couponId !== undefined
           } else if (operation === 'update') {
-            // On update the flags only change in one way: moving the order to cancelled or
-            // refunded clears them, and afterChange then puts the stock and coupon use back.
-            // Because they are cleared in the same save, a later update finds nothing left
-            // to give back. Reopening a cancelled order does not take stock again.
-            const released = RELEASED_ORDER_STATUSES.includes(data.status ?? originalDoc?.status)
-            data.inventoryReduced = released ? false : Boolean(originalDoc?.inventoryReduced)
-            data.couponUsageCounted = released ? false : Boolean(originalDoc?.couponUsageCounted)
+            // An update never writes the flags. Payload saves every field that is in
+            // `data`, and `data` holds the values read before this hook ran; writing them
+            // back could set a flag again that a simultaneous cancellation has just
+            // cleared, and the order's stock would then be given back twice. Removing them
+            // leaves the stored values alone. The only writer after creation is the atomic
+            // claim in afterChange (see claimOrderRelease), which also means a caller
+            // cannot change these fields.
+            delete data.inventoryReduced
+            delete data.couponUsageCounted
           }
 
           // Payload fills `data` with the stored value of every field the caller left out
@@ -728,15 +730,34 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
             }
           }
 
-          if (operation === 'update') {
-            // beforeChange cleared a flag in this save: the order moved to cancelled or
-            // refunded while it still held stock or a coupon use. What is given back is
-            // what the order held before this save, hence previousDoc.
-            if (previousDoc?.inventoryReduced && !doc.inventoryReduced) {
-              const demand = collectStockDemand(
-                previousDoc.items || [],
-                await loadLineProducts(req, productsSlug, previousDoc.items || []),
-              )
+          if (operation === 'update' && RELEASED_ORDER_STATUSES.includes(doc.status)) {
+            // The order is cancelled or refunded, so whatever it still holds is given back.
+            // Two updates can get here for the same order at the same time (a cancellation
+            // and a refund, or a double submit) and both have read the flags as set, so the
+            // flags that were read decide nothing. Each flag is claimed with one
+            // conditional database statement and only the update that clears it gives
+            // back. A later update finds the flags cleared and does nothing. Reopening a
+            // cancelled order does not take stock again.
+            const release = async (flag: 'couponUsageCounted' | 'inventoryReduced'): Promise<boolean> => {
+              // Skips the statement for an order that held nothing when this update began.
+              const claimed =
+                Boolean(previousDoc?.[flag] || doc[flag]) &&
+                (await claimOrderRelease(req.payload, {
+                  flag,
+                  orderId: doc.id,
+                  ordersSlug: collection.slug,
+                  req,
+                }))
+              // Whoever won the claim, the stored flag is cleared now; the returned
+              // document was read before the claim and has to say the same.
+              doc[flag] = false
+              return claimed
+            }
+
+            if (await release('inventoryReduced')) {
+              // What is given back is what the order held before this save, hence previousDoc.
+              const lines = previousDoc?.items || doc.items || []
+              const demand = collectStockDemand(lines, await loadLineProducts(req, productsSlug, lines))
 
               for (const entry of demand) {
                 await adjustStock(req.payload, {
@@ -749,8 +770,8 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
               }
             }
 
-            if (previousDoc?.couponUsageCounted && !doc.couponUsageCounted) {
-              const couponId = getRelationshipId(previousDoc.coupon)
+            if (await release('couponUsageCounted')) {
+              const couponId = getRelationshipId(previousDoc?.coupon ?? doc.coupon)
               if (couponId !== undefined) {
                 await adjustCouponUsage(req.payload, { couponId, couponsSlug, delta: -1, req })
               }

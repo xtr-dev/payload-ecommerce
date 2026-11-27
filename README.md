@@ -339,13 +339,13 @@ When an order is created (any status except `cancelled` / `refunded`):
 
 If any of these steps fails, the order is not created: inside a database transaction everything is rolled back, and on a database without transactions (the SQLite adapter's default) the plugin puts back what it took and deletes the order.
 
-The order records what it holds in two read-only fields, `inventoryReduced` and `couponUsageCounted`. When its status changes to `cancelled` or `refunded`, the stock is put back and the coupon use is given back, once; later updates do nothing more. Not handled: editing the items of an existing order does not adjust stock, and reopening a cancelled order does not take stock again.
+The order records what it holds in two read-only fields, `inventoryReduced` and `couponUsageCounted`. When its status changes to `cancelled` or `refunded`, the stock is put back and the coupon use is given back, once; later updates do nothing more. "Once" also holds when the order is cancelled and refunded at the same moment, or cancelled twice by a double submit: each flag is cleared with one conditional database statement, and only the update that clears it gives anything back. The flags are written when the order is created and by that statement only; an update never writes them, so a value passed by a caller is ignored. Not handled: editing the items of an existing order does not adjust stock, and reopening a cancelled order does not take stock again.
 
 Limits:
 
-- The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock or coupon usage columns have custom database names, the plugin falls back to read-then-write, which can oversell under concurrency.
+- The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock, coupon usage or order flag columns have custom database names, the plugin falls back to read-then-write, which can oversell or restore twice under concurrency.
 - On MongoDB, concurrent orders in transactions that touch the same product can fail with MongoDB's transient "write conflict" error even when enough stock is left. Nothing is oversold; retry the order.
-- Two simultaneous cancellations of the same order can both restore its stock.
+- Simultaneous updates of the same order are otherwise handled by Payload and the database, not by the plugin: without transactions (the SQLite adapter's default) Payload can reject all but one of them, and an edit that was read before a cancellation and written after it can put the old status back. In both cases the order's stock and coupon use are still given back at most once, and an order left open that way still holds them.
 
 The helpers `ecommerce.products.checkInventory`, `reduceInventory` (throws when stock is short) and `restoreInventory`, and `ecommerce.coupons.incrementCouponUsage` / `decrementCouponUsage` use the same atomic statements, for stock movements that are not orders. They take an optional `{ req }` as last argument to run inside a transaction.
 
