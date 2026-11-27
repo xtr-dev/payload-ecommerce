@@ -1,9 +1,11 @@
 import type { CollectionConfig } from 'payload'
 
+import type { EcommerceSlugs } from '../lib/slugs.js'
+
 import { createSlugHook } from '../lib/slug.js'
 
-export const Categories: CollectionConfig = {
-  slug: 'categories',
+export const createCategories = (slugs: EcommerceSlugs): CollectionConfig => ({
+  slug: slugs.categories,
   admin: {
     useAsTitle: 'name',
     defaultColumns: ['name', 'slug', 'parent', 'updatedAt'],
@@ -31,7 +33,7 @@ export const Categories: CollectionConfig = {
     {
       name: 'parent',
       type: 'relationship',
-      relationTo: 'categories',
+      relationTo: slugs.categories,
       admin: {
         description: 'Parent category for nesting',
       },
@@ -40,4 +42,4 @@ export const Categories: CollectionConfig = {
   hooks: {
     beforeChange: [createSlugHook('name')],
   },
-}
+})

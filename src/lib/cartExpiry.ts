@@ -1,5 +1,7 @@
 import type { Payload, PayloadRequest, TaskConfig } from 'payload'
 
+import { getEcommerceSlugs } from './slugs.js'
+
 /** Days a cart stays usable after it was last changed. */
 export const CART_LIFETIME_DAYS = 30
 
@@ -30,7 +32,7 @@ export const isCartExpired = (
 }
 
 export interface DeleteExpiredCartsOptions {
-  /** Slug of the carts collection. Default: `'carts'`. */
+  /** Slug of the carts collection. Default: the slug the plugin was configured with. */
   cartsSlug?: string
   /** Carts that expired at or before this moment are deleted. Default: now. */
   now?: Date
@@ -45,7 +47,7 @@ export interface DeleteExpiredCartsOptions {
  */
 export const deleteExpiredCarts = async (
   payload: Payload,
-  { cartsSlug = 'carts', now = new Date(), req }: DeleteExpiredCartsOptions = {},
+  { cartsSlug = getEcommerceSlugs(payload).carts, now = new Date(), req }: DeleteExpiredCartsOptions = {},
 ): Promise<{ deleted: number }> => {
   const result = await payload.delete({
     collection: cartsSlug,
@@ -71,7 +73,7 @@ export const deleteExpiredCarts = async (
  * the `cartCleanupTask` option is set; it can also be added to `jobs.tasks` by hand.
  * The task takes no input and reports the number of deleted carts as `deleted`.
  */
-export const createDeleteExpiredCartsTask = (cartsSlug = 'carts'): TaskConfig<any> => ({
+export const createDeleteExpiredCartsTask = (cartsSlug?: string): TaskConfig<any> => ({
   slug: DELETE_EXPIRED_CARTS_TASK_SLUG,
   handler: async ({ req }: { req: PayloadRequest }) => {
     const { deleted } = await deleteExpiredCarts(req.payload, { cartsSlug, req })

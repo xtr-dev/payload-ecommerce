@@ -54,11 +54,6 @@ The plugin provides 5 core collections:
 - `products` helpers: getProduct, getProducts, checkInventory, reduceInventory
 - `coupons` helpers: validateCoupon, incrementCouponUsage
 
-**Client-side** (`src/exports/client.tsx`):
-- `useCart()` - React hook for cart operations
-- `useProducts()` - React hook for product queries
-- `useOrders()` - React hook for order management
-
 ## Demo App Structure
 
 ```

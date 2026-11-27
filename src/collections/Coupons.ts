@@ -1,7 +1,9 @@
 import type { CollectionConfig } from 'payload'
 
-export const Coupons: CollectionConfig = {
-  slug: 'coupons',
+import type { EcommerceSlugs } from '../lib/slugs.js'
+
+export const createCoupons = (slugs: EcommerceSlugs): CollectionConfig => ({
+  slug: slugs.coupons,
   admin: {
     useAsTitle: 'code',
     defaultColumns: ['code', 'type', 'value', 'status', 'validUntil'],
@@ -144,7 +146,7 @@ export const Coupons: CollectionConfig = {
     {
       name: 'appliesToProducts',
       type: 'relationship',
-      relationTo: 'products',
+      relationTo: slugs.products,
       hasMany: true,
       admin: {
         description: 'Specific products this coupon applies to (empty = all products)',
@@ -153,7 +155,7 @@ export const Coupons: CollectionConfig = {
     {
       name: 'appliesToCategories',
       type: 'relationship',
-      relationTo: 'categories',
+      relationTo: slugs.categories,
       hasMany: true,
       admin: {
         description: 'Specific categories this coupon applies to (empty = all categories)',
@@ -185,4 +187,4 @@ export const Coupons: CollectionConfig = {
       },
     ],
   },
-}
+})

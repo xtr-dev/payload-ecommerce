@@ -5,6 +5,7 @@ import { describeStockShortage, resolveStockTarget } from '../lib/products.js'
 import { adjustCouponUsage, adjustStock, claimOrderRelease, hasActiveTransaction } from '../lib/atomic.js'
 import { evaluateCoupon, RELEASED_ORDER_STATUSES } from '../lib/coupons.js'
 import type { DocumentId } from '../lib/relationships.js'
+import type { EcommerceSlugs } from '../lib/slugs.js'
 import { getRelationshipId } from '../lib/relationships.js'
 import { calculateOrderTotal } from '../lib/totals.js'
 
@@ -217,17 +218,15 @@ const taxError = (operation: 'create' | 'update', reason: string, cause?: unknow
     { cause },
   )
 
-export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionConfig => {
-  const productsSlug = config.collections?.products
-    ? (typeof config.collections.products === 'string' ? config.collections.products : 'products')
-    : 'products'
-
-  const couponsSlug = config.collections?.coupons
-    ? (typeof config.collections.coupons === 'string' ? config.collections.coupons : 'coupons')
-    : 'coupons'
+export const createOrders = (
+  config: Pick<PayloadEcommerceConfig, 'hooks'>,
+  slugs: EcommerceSlugs,
+): CollectionConfig => {
+  const productsSlug = slugs.products
+  const couponsSlug = slugs.coupons
 
   return {
-    slug: 'orders',
+    slug: slugs.orders,
   admin: {
     useAsTitle: 'orderNumber',
     defaultColumns: ['orderNumber', 'user', 'total', 'status', 'createdAt'],
@@ -246,7 +245,7 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
     {
       name: 'user',
       type: 'relationship',
-      relationTo: 'users',
+      relationTo: slugs.users,
       admin: {
         description: 'User who placed the order (optional for guest orders)',
       },
@@ -260,7 +259,7 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
         {
           name: 'product',
           type: 'relationship',
-          relationTo: 'products',
+          relationTo: slugs.products,
           required: true,
         },
         {
@@ -418,7 +417,7 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
     {
       name: 'coupon',
       type: 'relationship',
-      relationTo: 'coupons',
+      relationTo: slugs.coupons,
       admin: {
         description:
           'On a new order the coupon is validated and sets the discount (or zeroes shipping for a free shipping coupon). Changing it later does not recalculate the order.',
@@ -787,5 +786,3 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
     },
   }
 }
-
-export const Orders: CollectionConfig = createOrders()
