@@ -370,12 +370,15 @@ pnpm build
 # Checks run by CI and before a release
 pnpm typecheck
 pnpm lint
-pnpm test        # integration tests (vitest)
+pnpm test        # integration tests (vitest) on a temporary SQLite database
+pnpm test:mongo  # the same tests on an in-memory MongoDB replica set
 pnpm test:pack   # build, pack and import every published export
 
 # Browser tests against the demo (not part of CI)
 pnpm test:e2e
 ```
+
+`pnpm test:mongo` downloads a MongoDB server binary on its first run (`mongodb-memory-server`). The demo itself runs on MongoDB when `DATABASE_ADAPTER=mongodb` and `DATABASE_URI` (a MongoDB connection string) are set; SQLite is the default.
 
 ## License
 
