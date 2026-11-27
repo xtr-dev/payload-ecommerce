@@ -20,6 +20,10 @@ import type { DocumentId } from './relationships.js'
  *   (for example a field given a custom `dbName`): a read followed by `payload.update`.
  *   That fallback is correct for one order at a time but can oversell under concurrency.
  *
+ * `claimOrderRelease` uses the same technique for a flag instead of a counter: "clear this
+ * flag, but only if it is still set", so that of several simultaneous cancellations of one
+ * order exactly one gives the order's stock and coupon use back.
+ *
  * All of them run in the transaction of the `req` they are given, when it has one.
  */
 
@@ -397,6 +401,78 @@ export const adjustCouponUsage = async (
     id: couponId,
     collection: couponsSlug,
     data: { usageCount: usageCount + delta },
+    req,
+  })
+  return true
+}
+
+/**
+ * The order fields that record what an order still holds: `inventoryReduced` while it
+ * holds stock, `couponUsageCounted` while it counts as a use of its coupon.
+ */
+export type OrderHoldFlag = 'couponUsageCounted' | 'inventoryReduced'
+
+export interface ClaimOrderReleaseParams {
+  ordersSlug: string
+  orderId: DocumentId
+  flag: OrderHoldFlag
+  req?: PayloadRequest
+}
+
+/**
+ * Clears one of an order's hold flags in a single atomic step and tells whether this call
+ * was the one that cleared it. Only the caller that gets `true` may give back what the flag
+ * stands for (the order's stock, or its coupon use): when an order is cancelled and
+ * refunded at the same moment, or cancelled twice, every caller but one gets `false`.
+ * Also returns `false` when the flag was not set or the order does not exist.
+ */
+export const claimOrderRelease = async (
+  payload: Payload,
+  { ordersSlug, orderId, flag, req }: ClaimOrderReleaseParams,
+): Promise<boolean> => {
+  const db = internals(payload)
+
+  if (db.name === 'mongoose') {
+    return await runMongoUpdate(
+      payload,
+      ordersSlug,
+      { _id: orderId, [flag]: true },
+      { $set: { [flag]: false } },
+      req,
+    )
+  }
+
+  const columnName = toSnakeCase(flag)
+  const table = resolveSqlTable(payload, toSnakeCase(ordersSlug), ['id', columnName])
+  if (table) {
+    const column = quoteIdentifier(columnName)
+
+    return await runSqlUpdate(
+      payload,
+      `UPDATE ${table} SET ${column} = FALSE WHERE "id" = ${idLiteral(orderId)} AND ${column} = TRUE RETURNING "id"`,
+      req,
+    )
+  }
+
+  // Non-atomic fallback: read, check, write. Two simultaneous callers can both read the
+  // flag as set and both be told they cleared it.
+  const order = await payload.findByID({
+    id: orderId,
+    collection: ordersSlug,
+    depth: 0,
+    disableErrors: true,
+    req,
+  })
+  if (!order?.[flag]) {
+    return false
+  }
+  // The whole document is written back because not every adapter can update one field of
+  // a document that has required fields.
+  const { id: _id, ...fields } = order
+  await payload.db.updateOne({
+    id: orderId,
+    collection: ordersSlug,
+    data: { ...fields, [flag]: false },
     req,
   })
   return true

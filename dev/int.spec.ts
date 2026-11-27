@@ -2,7 +2,7 @@ import type { Payload } from 'payload'
 
 import config from '@payload-config'
 import { getPayload } from 'payload'
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
 import { createOrders } from '../src/collections/Orders.js'
 import {
@@ -1059,6 +1059,154 @@ describe('Ecommerce Plugin integration tests', () => {
         expect(next.couponUsageCounted).toBe(true)
       },
     )
+
+    // Every update below reads the order while its flags are still set. Only the atomic
+    // claim of each flag (claimOrderRelease) keeps all but one from giving the stock back.
+    test.each([
+      { name: 'eight simultaneous cancellations', statuses: Array.from({ length: 8 }, () => 'cancelled') },
+      { name: 'a simultaneous cancellation and refund', statuses: ['cancelled', 'refunded'] },
+      {
+        name: 'simultaneous cancellations, refunds and an unrelated edit',
+        statuses: ['cancelled', 'refunded', undefined, 'cancelled', 'refunded', undefined],
+      },
+    ])('$name of one order restore its stock and coupon use exactly once', async ({ name, statuses }) => {
+      const product = await createProduct(`Concurrent Release Product ${name}`, {
+        ...tracked(10),
+        variants: [{ name: 'Blue', inventory: 5 }],
+      })
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: `RELEASE-${name.length}-${statuses.length}`, status: 'active', type: 'fixed', value: 1 },
+      })
+      // A second order keeps the coupon's usageCount at 1 after the first is released, so
+      // a use given back twice would show as 0.
+      await createOrder([{ product, quantity: 1 }], { coupon: coupon.id })
+      const order = await createOrder(
+        [
+          { product, quantity: 4 },
+          { product, quantity: 2, variant: 'Blue' },
+        ],
+        { coupon: coupon.id },
+      )
+      expect(await stockOf(product)).toBe(5)
+      expect(await variantStockOf(product, 'Blue')).toBe(3)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(2)
+
+      const results = await Promise.allSettled(
+        statuses.map((status, index) =>
+          payload.update({
+            id: order.id,
+            collection: 'orders',
+            // An update without a status stands for an edit that arrives during the cancellation.
+            data: status ? { status } : { notes: `edit ${index}` },
+          }),
+        ),
+      )
+      // What Payload does with simultaneous updates of one document is not the plugin's
+      // to decide: on SQLite without transactions it can reject all but one (they collide
+      // while rewriting the item rows), and the unrelated edit can overwrite the status
+      // with the one it read, leaving the order open and still holding its stock. So
+      // neither a rejection nor an order that is still open is a failure here. A final
+      // cancellation makes sure the order ends up released, and what must hold is that
+      // across all of these updates the stock and coupon use came back exactly once.
+      for (const result of results) {
+        if (result.status === 'fulfilled' && ['cancelled', 'refunded'].includes(result.value.status)) {
+          expect(result.value).toMatchObject({ couponUsageCounted: false, inventoryReduced: false })
+        }
+      }
+
+      await payload.update({ id: order.id, collection: 'orders', data: { status: 'cancelled' } })
+
+      const stored = await payload.findByID({ id: order.id, collection: 'orders', depth: 0 })
+      expect(stored).toMatchObject({ couponUsageCounted: false, inventoryReduced: false })
+      expect(await stockOf(product)).toBe(9)
+      expect(await variantStockOf(product, 'Blue')).toBe(5)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(1)
+    })
+
+    // The race itself, made deterministic: two updates that both read the order while it
+    // still held its stock (previousDoc) and both saved it as cancelled reach the
+    // afterChange hook together. Before the atomic claim both of them restored the stock.
+    test('two cancellations that both read the order as holding stock restore it once', async () => {
+      const product = await createProduct('Interleaved Release Product', {
+        ...tracked(10),
+        variants: [{ name: 'Blue', inventory: 5 }],
+      })
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'INTERLEAVED', status: 'active', type: 'fixed', value: 1 },
+      })
+      await createOrder([{ product, quantity: 1 }], { coupon: coupon.id })
+      const order = await createOrder(
+        [
+          { product, quantity: 4 },
+          { product, quantity: 2, variant: 'Blue' },
+        ],
+        { coupon: coupon.id },
+      )
+      const held = await payload.findByID({ id: order.id, collection: 'orders', depth: 0 })
+      expect(held).toMatchObject({ couponUsageCounted: true, inventoryReduced: true })
+
+      const afterChange = payload.collections.orders.config.hooks.afterChange[0]
+      const runCancellation = async (status: string) =>
+        await afterChange({
+          collection: payload.collections.orders.config,
+          context: {},
+          // What each update got back from its own write: the new status, flags still set.
+          doc: { ...structuredClone(held), status },
+          operation: 'update',
+          previousDoc: structuredClone(held),
+          req: { payload } as never,
+        })
+
+      const docs = await Promise.all([
+        runCancellation('cancelled'),
+        runCancellation('refunded'),
+        runCancellation('cancelled'),
+        runCancellation('refunded'),
+      ])
+
+      expect(await stockOf(product)).toBe(9)
+      expect(await variantStockOf(product, 'Blue')).toBe(5)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(1)
+      for (const doc of docs) {
+        expect(doc).toMatchObject({ couponUsageCounted: false, inventoryReduced: false })
+      }
+
+      const stored = await payload.findByID({ id: order.id, collection: 'orders', depth: 0 })
+      expect(stored).toMatchObject({ couponUsageCounted: false, inventoryReduced: false })
+    })
+
+    // An update must not write the flags it read: a cancellation that finishes between an
+    // edit's read and its write has cleared them, and the edit would set them again.
+    test('an update of an order does not write its hold flags', async () => {
+      const product = await createProduct('Flag Write Product', tracked(5))
+      const order = await createOrder([{ product, quantity: 1 }])
+      const write = vi.spyOn(payload.db, 'updateOne')
+
+      try {
+        const updated = await payload.update({
+          id: order.id,
+          collection: 'orders',
+          data: { couponUsageCounted: true, inventoryReduced: false, notes: 'edited' },
+        })
+        // The caller's values are ignored and the stored ones are returned.
+        expect(updated).toMatchObject({ couponUsageCounted: false, inventoryReduced: true })
+
+        const orderWrites = write.mock.calls
+          .map(([args]) => args)
+          .filter((args) => args.collection === 'orders')
+        expect(orderWrites).toHaveLength(1)
+        expect(orderWrites[0].data).toMatchObject({ notes: 'edited' })
+        expect(orderWrites[0].data).not.toHaveProperty('inventoryReduced')
+        expect(orderWrites[0].data).not.toHaveProperty('couponUsageCounted')
+      } finally {
+        write.mockRestore()
+      }
+
+      const stored = await payload.findByID({ id: order.id, collection: 'orders', depth: 0 })
+      expect(stored).toMatchObject({ couponUsageCounted: false, inventoryReduced: true, notes: 'edited' })
+    })
 
     test('an order whose stock was never reduced restores nothing when cancelled', async () => {
       const product = await createProduct('Never Reduced Product', tracked(5))
