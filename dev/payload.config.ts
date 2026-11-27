@@ -69,6 +69,12 @@ export default buildConfig({
           // - Product tax categories
           // - Integration with tax services (Stripe Tax, Avalara, etc.)
 
+          // Used by the integration tests to check that a failing calculateTax hook
+          // fails the order instead of saving it without tax.
+          if (orderData.shippingAddress?.address2 === 'test: fail in calculateTax') {
+            throw new Error('tax service unavailable');
+          }
+
           const taxableAmount = orderData.subtotal - orderData.discount;
           const taxRate = 0.10; // 10% tax rate
 

@@ -872,6 +872,132 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(await ordersContaining(product)).toBe(0)
     })
 
+    // The dev config's calculateTax hook throws for a shipping address with this address2.
+    const taxFailingAddress = { ...address, address2: 'test: fail in calculateTax' }
+
+    test('an order whose calculateTax hook fails is not created and takes nothing', async () => {
+      const product = await createProduct('Failing Tax Create Product', tracked(5))
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'FAILINGTAX', status: 'active', type: 'fixed', value: 1 },
+      })
+
+      await expect(
+        createOrder([{ product, quantity: 2 }], {
+          coupon: coupon.id,
+          shippingAddress: taxFailingAddress,
+        }),
+      ).rejects.toThrow('Order was not created: tax could not be calculated (tax service unavailable)')
+
+      expect(await stockOf(product)).toBe(5)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(0)
+      expect(await ordersContaining(product)).toBe(0)
+    })
+
+    test('createOrderFromCart fails and keeps the cart when the calculateTax hook fails', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Failing Tax Cart Product', tracked(5))
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 2,
+        sessionId: 'failing-tax-cart-session',
+      })
+
+      await expect(
+        ecommerce.orders.createOrderFromCart({
+          cartId: cart.id,
+          orderData: { shippingAddress: taxFailingAddress },
+        }),
+      ).rejects.toThrow('tax could not be calculated')
+
+      expect(await stockOf(product)).toBe(5)
+      expect(await ordersContaining(product)).toBe(0)
+      // The customer can retry: the cart still holds the line.
+      expect((await payload.findByID({ id: cart.id, collection: 'carts' })).items).toHaveLength(1)
+    })
+
+    test('an update whose calculateTax hook fails changes nothing, including stock and coupon use', async () => {
+      const product = await createProduct('Failing Tax Update Product', tracked(5))
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'FAILINGTAXUPDATE', status: 'active', type: 'fixed', value: 1 },
+      })
+      const order = await createOrder([{ product, quantity: 2 }], { coupon: coupon.id })
+      expect(await stockOf(product)).toBe(3)
+
+      // The address change makes the tax hook run and fail; the cancellation in the same
+      // update must not go through, so the order keeps its stock and its coupon use.
+      await expect(
+        payload.update({
+          id: order.id,
+          collection: 'orders',
+          data: { shippingAddress: taxFailingAddress, status: 'cancelled' },
+        }),
+      ).rejects.toThrow('Order was not updated: tax could not be calculated (tax service unavailable)')
+
+      const stored = await payload.findByID({ id: order.id, collection: 'orders', depth: 0 })
+      expect(stored).toMatchObject({
+        couponUsageCounted: true,
+        inventoryReduced: true,
+        status: 'pending',
+        tax: order.tax,
+        total: order.total,
+      })
+      expect(stored.shippingAddress.address2 ?? null).toBeNull()
+      expect(await stockOf(product)).toBe(3)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(1)
+
+      // An update that changes no tax input does not call the hook, so the order can still
+      // be cancelled, and that gives everything back once.
+      await payload.update({ id: order.id, collection: 'orders', data: { status: 'cancelled' } })
+      expect(await stockOf(product)).toBe(5)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(0)
+    })
+
+    test.each([
+      { name: 'NaN', value: Number.NaN },
+      { name: 'undefined', value: undefined },
+      { name: 'a string', value: '4' },
+    ])('a calculateTax hook that returns $name fails the order', async ({ value }) => {
+      const orders = createOrders({ hooks: { calculateTax: () => value as never } })
+      const beforeChange = orders.hooks?.beforeChange?.[0]
+
+      await expect(
+        beforeChange!({
+          collection: payload.collections.orders.config,
+          context: {},
+          data: { shipping: 8, subtotal: 30, status: 'cancelled' },
+          operation: 'create',
+          req: { payload } as never,
+        }),
+      ).rejects.toThrow('tax could not be calculated (the calculateTax hook returned')
+    })
+
+    test('the error of a failing calculateTax hook keeps the original error as its cause', async () => {
+      const original = new Error('rate table missing')
+      const orders = createOrders({
+        hooks: {
+          calculateTax: () => {
+            throw original
+          },
+        },
+      })
+
+      const failure = await orders.hooks!.beforeChange![0]({
+        collection: payload.collections.orders.config,
+        context: {},
+        data: { subtotal: 30, status: 'cancelled' },
+        operation: 'create',
+        req: { payload } as never,
+      }).then(
+        () => undefined,
+        (error: Error) => error,
+      )
+
+      expect(failure?.message).toBe('Order was not created: tax could not be calculated (rate table missing)')
+      expect(failure?.cause).toBe(original)
+    })
+
     test.each(['cancelled', 'refunded'] as const)(
       'moving an order to %s restores stock and the coupon use exactly once',
       async (status) => {
