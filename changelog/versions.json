@@ -1,0 +1,427 @@
+{
+  "$schema": "https://unpkg.com/@xtr-dev/changelog/schema/versions.schema.json",
+  "schemaVersion": 2,
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-11-27",
+      "commit": "02e3801",
+      "breaking": true,
+      "groups": {
+        "breaking": [
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "remove unimplemented options and exports, honour configured slugs everywhere (#19)",
+            "commit": "91a9a3a",
+            "hash": "91a9a3a83a7abfe3f6bc62e005b1c3e49f813888",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "secure default access for all collections (#18)",
+            "commit": "9d456d8",
+            "hash": "9d456d804258c359f1ddfe65ac7006b96b9353d6",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "fail the order when the calculateTax hook fails (#15)",
+            "commit": "751da52",
+            "hash": "751da52c7a6c6db38e59e5429f0a39b30b98629b",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "identify cart lines by product and variant in updateCartItem (#14)",
+            "commit": "1c3b7de",
+            "hash": "1c3b7defa9d59fb448c62d90b55e018c86f1348f",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "ignore expired carts, extend carts on activity and add expired-cart cleanup (#10)",
+            "commit": "2f1f13b",
+            "hash": "2f1f13bb38812f8e9977e32bf73d8baa550cbc1f",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "check stock, make order side effects atomic and reverse them on cancel or refund (#9)",
+            "commit": "30a09fa",
+            "hash": "30a09fae8bf6801f0b436067d460388547e8f040",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "apply coupons when an order is created, including free shipping (#8)",
+            "commit": "b691fb8",
+            "hash": "b691fb87354ae9e4f24deba2c488f973e1864bb9",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "always compute the order total from its parts (#6)",
+            "commit": "363ffdc",
+            "hash": "363ffdcbdf8f6abdb4c3e8421f670314a841f30d",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ],
+        "features": [
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "develop on Payload 3.94 and Next 16, warn on the non-atomic fallback, allow a cart cleanup schedule (#21)",
+            "commit": "02e3801",
+            "hash": "02e3801b049283c2ad505fdd9c32022a288661ac",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "round money, accept ids as text, relax addresses and add customerEmail for guest orders (#20)",
+            "commit": "4e2e7f9",
+            "hash": "4e2e7f9249b1f8b568d065f6d6294429843ab9a0",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "remove unimplemented options and exports, honour configured slugs everywhere (#19)",
+            "commit": "91a9a3a",
+            "hash": "91a9a3a83a7abfe3f6bc62e005b1c3e49f813888",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "secure default access for all collections (#18)",
+            "commit": "9d456d8",
+            "hash": "9d456d804258c359f1ddfe65ac7006b96b9353d6",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "generate unique product and category slugs from one shared helper (#11)",
+            "commit": "c684435",
+            "hash": "c684435011041175fb2f6a2faff011eaea0c7162",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "ignore expired carts, extend carts on activity and add expired-cart cleanup (#10)",
+            "commit": "2f1f13b",
+            "hash": "2f1f13bb38812f8e9977e32bf73d8baa550cbc1f",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "apply coupons when an order is created, including free shipping (#8)",
+            "commit": "b691fb8",
+            "hash": "b691fb87354ae9e4f24deba2c488f973e1864bb9",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ],
+        "fixes": [
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "restore an order's stock and coupon use once under simultaneous cancellations (#16)",
+            "commit": "00622aa",
+            "hash": "00622aae22fd4973f52b9f33d85a8db4170cb909",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "fail the order when the calculateTax hook fails (#15)",
+            "commit": "751da52",
+            "hash": "751da52c7a6c6db38e59e5429f0a39b30b98629b",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "identify cart lines by product and variant in updateCartItem (#14)",
+            "commit": "1c3b7de",
+            "hash": "1c3b7defa9d59fb448c62d90b55e018c86f1348f",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "price cart and order lines with the variant's own price (#13)",
+            "commit": "97cceac",
+            "hash": "97cceac029c325337fa33dd5a1a4bc1f6ad43406",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "check stock, make order side effects atomic and reverse them on cancel or refund (#9)",
+            "commit": "30a09fa",
+            "hash": "30a09fae8bf6801f0b436067d460388547e8f040",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "recalculate order tax only when a tax input changes (#7)",
+            "commit": "9bb7bd7",
+            "hash": "9bb7bd7523d3d277deea8bfd7def80e93872c2e7",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "always compute the order total from its parts (#6)",
+            "commit": "363ffdc",
+            "hash": "363ffdcbdf8f6abdb4c3e8421f670314a841f30d",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "handle numeric document ids in order, cart and coupon logic (#5)",
+            "commit": "0834eaf",
+            "hash": "0834eaf88cc29353edd582f9b513274f8a51d530",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ],
+        "other": [
+          {
+            "type": "ci",
+            "scope": null,
+            "description": "run the integration tests against MongoDB as well as SQLite (#17)",
+            "commit": "ec6a8b0",
+            "hash": "ec6a8b06a09b7e056164aad1e97a46a039923f8d",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "docs",
+            "scope": null,
+            "description": "describe what the plugin does and mark what is not implemented (#12)",
+            "commit": "90c5de7",
+            "hash": "90c5de7024654fb37c57472a826e81dbf523c3cf",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "ci",
+            "scope": null,
+            "description": "align workflows with the other plugin repos (#4)",
+            "commit": "ae79c82",
+            "hash": "ae79c8218c20cf63568842f2bbfc9999aa2e6468",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "docs",
+            "scope": null,
+            "description": "replace the pre-release warning with a v0.x note (#3)",
+            "commit": "50fae35",
+            "hash": "50fae356a2c1533b745cbdcf2c465d7143b3de36",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
