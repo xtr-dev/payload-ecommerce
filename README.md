@@ -168,11 +168,11 @@ payloadEcommerce({
 
 A coupon is applied by the plugin when an order is created with it. Pass the coupon's id as `coupon` (or its code as `orderData.couponCode` to `createOrderFromCart`); the orders collection then:
 
-1. Checks the coupon against the order: status `active`, within `validFrom`/`validUntil`, `usageCount` below `usageLimit`, the customer's earlier orders with this coupon below `customerLimit` (only for orders with a `user`), `subtotal` at least `minPurchase`, and at least one order item matching `appliesToProducts` / `appliesToCategories` when those are set. A limit of 0 or an empty restriction means no limit.
+1. Checks the coupon against the order: status `active`, within `validFrom`/`validUntil`, `usageCount` below `usageLimit`, the customer's earlier orders with this coupon (cancelled and refunded ones excluded) below `customerLimit` (only for orders with a `user`), `subtotal` at least `minPurchase`, and at least one order item matching `appliesToProducts` / `appliesToCategories` when those are set. A limit of 0 or an empty restriction means no limit.
 2. Rejects the order with a validation error on `coupon` when a check fails.
 3. Sets `discount` — a percentage of the subtotal (capped by `maxDiscount`) or the fixed amount, never more than the subtotal. A `discount` passed together with a coupon is ignored.
 4. Sets `shipping` to 0 for a `freeShipping` coupon (its `discount` is 0).
-5. Increments the coupon's `usageCount`.
+5. Increments the coupon's `usageCount`, and gives that use back when the order is cancelled or refunded (see "Inventory and Order Side Effects").
 
 Tax and total are calculated after that, so they include the coupon's effect. Without a coupon, the caller's `discount` is used as is. Changing the coupon of an existing order does not recalculate it.
 
@@ -255,17 +255,27 @@ calculateTax: async ({ subtotal, discount, shippingAddress }) => {
 }
 ```
 
-## Inventory Tracking
+## Inventory and Order Side Effects
 
-Inventory is automatically decremented when orders are created:
+Products with `inventory.trackQuantity` have stock. A variant with its own `inventory` number is tracked separately; an order line without a variant, or for a variant whose `inventory` is empty, draws from the product's `inventory.quantity`. There is no backorder option: a tracked product cannot be ordered beyond its stock.
 
-```typescript
-// Product has inventory: { trackQuantity: true, quantity: 100 }
-// Customer orders quantity: 3
-// After order creation: inventory.quantity = 97
-```
+When an order is created (any status except `cancelled` / `refunded`):
 
-Variants track inventory independently of the parent product.
+1. Stock is checked first. An order asking for more than is available is rejected with a validation error on `items` such as `Not enough stock for "Blue Shirt" (variant "M"): 3 requested, 1 available`. Lines for the same product are added up.
+2. Stock is reduced and the coupon's `usageCount` is incremented, each with one conditional database statement, so concurrent orders cannot oversell the last units or take a coupon past its `usageLimit`. The order that loses such a race is rejected.
+3. The `afterCreateOrder` hook runs.
+
+If any of these steps fails, the order is not created: inside a database transaction everything is rolled back, and on a database without transactions (the SQLite adapter's default) the plugin puts back what it took and deletes the order.
+
+The order records what it holds in two read-only fields, `inventoryReduced` and `couponUsageCounted`. When its status changes to `cancelled` or `refunded`, the stock is put back and the coupon use is given back, once; later updates do nothing more. Not handled: editing the items of an existing order does not adjust stock, and reopening a cancelled order does not take stock again.
+
+Limits:
+
+- The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock or coupon usage columns have custom database names, the plugin falls back to read-then-write, which can oversell under concurrency.
+- On MongoDB, concurrent orders in transactions that touch the same product can fail with MongoDB's transient "write conflict" error even when enough stock is left. Nothing is oversold; retry the order.
+- Two simultaneous cancellations of the same order can both restore its stock.
+
+The helpers `ecommerce.products.checkInventory`, `reduceInventory` (throws when stock is short) and `restoreInventory`, and `ecommerce.coupons.incrementCouponUsage` / `decrementCouponUsage` use the same atomic statements, for stock movements that are not orders. They take an optional `{ req }` as last argument to run inside a transaction.
 
 ## Development
 

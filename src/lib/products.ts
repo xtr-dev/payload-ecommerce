@@ -1,6 +1,8 @@
-import type { Payload } from 'payload'
+import type { Payload, PayloadRequest } from 'payload'
 
 import type { DocumentId } from './relationships.js'
+
+import { adjustStock } from './atomic.js'
 
 export interface GetProductsParams {
   category?: DocumentId
@@ -10,6 +12,62 @@ export interface GetProductsParams {
   search?: string
   limit?: number
   page?: number
+}
+
+export interface InventoryOptions {
+  /** Request whose transaction the stock read and write should run in. */
+  req?: PayloadRequest
+}
+
+export interface StockTarget {
+  /** False when the product does not track its quantity; stock is then unlimited. */
+  tracked: boolean
+  /** Set when the stock is the named variant's own `inventory` number. */
+  variant?: string
+  /** Units in stock for this target; `Infinity` when not tracked. */
+  available: number
+}
+
+/**
+ * Decides which stock number an order line for `product` (optionally in `variant`) draws
+ * from. Only products with `inventory.trackQuantity` have stock at all. For those, a
+ * variant that has its own `inventory` number is tracked on its own; a line without a
+ * variant, with an unknown variant name, or with a variant whose `inventory` is left empty
+ * draws from the product's `inventory.quantity`.
+ */
+export const resolveStockTarget = (product: any, variant?: null | string): StockTarget => {
+  if (!product?.inventory?.trackQuantity) {
+    return { available: Infinity, tracked: false }
+  }
+
+  if (variant) {
+    const variantData = (product.variants || []).find(
+      (candidate: { name?: string }) => candidate.name === variant,
+    )
+    if (variantData && typeof variantData.inventory === 'number') {
+      return { available: variantData.inventory, tracked: true, variant }
+    }
+  }
+
+  return { available: product.inventory.quantity || 0, tracked: true }
+}
+
+/**
+ * The message shown when an order asks for more units than are in stock. `available` is
+ * left out when the number that was read may be out of date, which is the case after
+ * losing a race against another order.
+ */
+export const describeStockShortage = (
+  product: any,
+  variant: null | string | undefined,
+  requested: number,
+  available?: number,
+): string => {
+  const name = product?.title ? `"${product.title}"` : `product ${product?.id}`
+  const variantPart = variant ? ` (variant "${variant}")` : ''
+  const availablePart = available === undefined ? '' : `, ${available} available`
+
+  return `Not enough stock for ${name}${variantPart}: ${requested} requested${availablePart}`
 }
 
 export const createProductHelpers = (payload: Payload, productsSlug = 'products') => {
@@ -75,106 +133,97 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
     })
   }
 
-  const checkInventory = async (productId: DocumentId, quantity: number, variant?: string) => {
+  const loadProduct = async (productId: DocumentId, req?: PayloadRequest) => {
     const product = await payload.findByID({
-      collection: productsSlug,
       id: productId,
+      collection: productsSlug,
+      depth: 0,
+      disableErrors: true,
+      req,
     })
 
     if (!product) {
-      throw new Error('Product not found')
+      throw new Error(`Product not found: ${productId}`)
     }
 
-    if (!product.inventory?.trackQuantity) {
-      return { available: true, quantity: Infinity }
-    }
-
-    if (variant && product.variants) {
-      const variantData = product.variants.find((v: any) => v.name === variant)
-      if (variantData) {
-        const available = variantData.inventory >= quantity
-        return { available, quantity: variantData.inventory }
-      }
-    }
-
-    const available = (product.inventory?.quantity || 0) >= quantity
-    return { available, quantity: product.inventory?.quantity || 0 }
+    return product
   }
 
-  const reduceInventory = async (productId: DocumentId, quantity: number, variant?: string) => {
-    const product = await payload.findByID({
-      collection: productsSlug,
-      id: productId,
-    })
+  /**
+   * Tells whether `quantity` units can be ordered. A product that does not track its
+   * quantity is always available. This is a read, so two concurrent callers can both be
+   * told "available" for the last unit; `reduceInventory` is what decides.
+   */
+  const checkInventory = async (
+    productId: DocumentId,
+    quantity: number,
+    variant?: string,
+    options: InventoryOptions = {},
+  ) => {
+    const target = resolveStockTarget(await loadProduct(productId, options.req), variant)
 
-    if (!product || !product.inventory?.trackQuantity) {
+    return { available: !target.tracked || target.available >= quantity, quantity: target.available }
+  }
+
+  /**
+   * Takes `quantity` units out of stock in one atomic step (see `adjustStock`) and returns
+   * the product. Throws when fewer units are left, leaving the stock untouched. Does
+   * nothing for a product that does not track its quantity.
+   */
+  const reduceInventory = async (
+    productId: DocumentId,
+    quantity: number,
+    variant?: string,
+    options: InventoryOptions = {},
+  ) => {
+    const product = await loadProduct(productId, options.req)
+    const target = resolveStockTarget(product, variant)
+
+    if (!target.tracked) {
       return product
     }
 
-    if (variant && product.variants) {
-      const variants = [...product.variants]
-      const variantIndex = variants.findIndex((v: any) => v.name === variant)
+    const reduced = await adjustStock(payload, {
+      delta: -quantity,
+      productId,
+      productsSlug,
+      req: options.req,
+      variant: target.variant,
+    })
 
-      if (variantIndex !== -1) {
-        variants[variantIndex].inventory -= quantity
-        return await payload.update({
-          collection: productsSlug,
-          id: productId,
-          data: { variants },
-        })
-      }
+    if (!reduced) {
+      throw new Error(describeStockShortage(product, variant, quantity, target.available))
     }
 
-    const newQuantity = (product.inventory?.quantity || 0) - quantity
-
-    return await payload.update({
-      collection: productsSlug,
-      id: productId,
-      data: {
-        inventory: {
-          ...product.inventory,
-          quantity: Math.max(0, newQuantity),
-        },
-      },
-    })
+    return await loadProduct(productId, options.req)
   }
 
-  const restoreInventory = async (productId: DocumentId, quantity: number, variant?: string) => {
-    const product = await payload.findByID({
-      collection: productsSlug,
-      id: productId,
-    })
+  /**
+   * Puts `quantity` units back in stock in one atomic step and returns the product. Does
+   * nothing for a product that does not track its quantity.
+   */
+  const restoreInventory = async (
+    productId: DocumentId,
+    quantity: number,
+    variant?: string,
+    options: InventoryOptions = {},
+  ) => {
+    const product = await loadProduct(productId, options.req)
+    const target = resolveStockTarget(product, variant)
 
-    if (!product || !product.inventory?.trackQuantity) {
+    if (!target.tracked) {
       return product
     }
 
-    if (variant && product.variants) {
-      const variants = [...product.variants]
-      const variantIndex = variants.findIndex((v: any) => v.name === variant)
-
-      if (variantIndex !== -1) {
-        variants[variantIndex].inventory += quantity
-        return await payload.update({
-          collection: productsSlug,
-          id: productId,
-          data: { variants },
-        })
-      }
-    }
-
-    const newQuantity = (product.inventory?.quantity || 0) + quantity
-
-    return await payload.update({
-      collection: productsSlug,
-      id: productId,
-      data: {
-        inventory: {
-          ...product.inventory,
-          quantity: newQuantity,
-        },
-      },
+    await adjustStock(payload, {
+      delta: quantity,
+      productId,
+      productsSlug,
+      req: options.req,
+      variant: target.variant,
     })
+
+    return await loadProduct(productId, options.req)
   }
 
   return {

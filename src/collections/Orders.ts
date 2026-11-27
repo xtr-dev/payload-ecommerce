@@ -1,8 +1,9 @@
-import type { CollectionConfig } from 'payload'
+import type { CollectionConfig, PayloadRequest } from 'payload'
 import { ValidationError } from 'payload'
 import type { PayloadEcommerceConfig } from '../index.js'
-import { createProductHelpers } from '../lib/products.js'
-import { createCouponHelpers, evaluateCoupon } from '../lib/coupons.js'
+import { describeStockShortage, resolveStockTarget } from '../lib/products.js'
+import { adjustCouponUsage, adjustStock, hasActiveTransaction } from '../lib/atomic.js'
+import { evaluateCoupon, RELEASED_ORDER_STATUSES } from '../lib/coupons.js'
 import type { DocumentId } from '../lib/relationships.js'
 import { getRelationshipId } from '../lib/relationships.js'
 import { calculateOrderTotal } from '../lib/totals.js'
@@ -96,6 +97,111 @@ const addressFields = [
     type: 'text' as const,
   },
 ]
+
+interface OrderLine {
+  product?: unknown
+  quantity?: number
+  variant?: null | string
+}
+
+/**
+ * Loads each distinct product of the given order lines once, without populating its
+ * relationships. A product that no longer exists is left out of the result.
+ */
+const loadLineProducts = async (
+  req: PayloadRequest,
+  productsSlug: string,
+  lines: OrderLine[],
+): Promise<Map<string, any>> => {
+  const products = new Map<string, any>()
+
+  for (const line of lines) {
+    const productId = getRelationshipId(line.product)
+    if (productId === undefined || products.has(String(productId))) {
+      continue
+    }
+
+    const product = await req.payload.findByID({
+      id: productId,
+      collection: productsSlug,
+      depth: 0,
+      disableErrors: true,
+      req,
+    })
+    if (product) {
+      products.set(String(productId), product)
+    }
+  }
+
+  return products
+}
+
+interface StockDemand {
+  product: any
+  productId: DocumentId
+  /** Variant name as written on the order line, used in messages. */
+  lineVariant?: null | string
+  /** Variant whose own stock is used; undefined when the product's quantity is used. */
+  variant?: string
+  quantity: number
+  available: number
+}
+
+/**
+ * Adds up the order lines per stock number they draw from (a product's quantity, or one
+ * variant's inventory), so that two lines for the same product are checked and taken
+ * together. Lines for products that do not track their quantity are left out.
+ */
+const collectStockDemand = (lines: OrderLine[], products: Map<string, any>): StockDemand[] => {
+  const demand = new Map<string, StockDemand>()
+
+  for (const line of lines) {
+    const productId = getRelationshipId(line.product)
+    const product = productId === undefined ? undefined : products.get(String(productId))
+    if (productId === undefined || !product) {
+      continue
+    }
+
+    const target = resolveStockTarget(product, line.variant)
+    if (!target.tracked) {
+      continue
+    }
+
+    const key = JSON.stringify([String(productId), target.variant ?? null])
+    const existing = demand.get(key)
+    if (existing) {
+      existing.quantity += line.quantity || 0
+    } else {
+      demand.set(key, {
+        available: target.available,
+        lineVariant: line.variant,
+        product,
+        productId,
+        quantity: line.quantity || 0,
+        variant: target.variant,
+      })
+    }
+  }
+
+  return [...demand.values()]
+}
+
+/**
+ * Builds the error that rejects an order. It is a Payload ValidationError, so the admin UI
+ * and the REST API report it on the given field, but with the reason as its `message`:
+ * Payload's own message only says which field is invalid, which tells a caller of the
+ * local API nothing about what to change.
+ */
+const orderError = (
+  collection: string,
+  path: string,
+  message: string,
+  req: PayloadRequest,
+): ValidationError => {
+  const error = new ValidationError({ collection, errors: [{ message, path }] }, req.t)
+  error.message = message
+  return error
+}
 
 export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionConfig => {
   const productsSlug = config.collections?.products
@@ -305,6 +411,28 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
       },
     },
     {
+      name: 'inventoryReduced',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: {
+        position: 'sidebar',
+        readOnly: true,
+        description:
+          'Set by the plugin while this order holds stock. Cleared when the stock is put back on cancellation or refund.',
+      },
+    },
+    {
+      name: 'couponUsageCounted',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: {
+        position: 'sidebar',
+        readOnly: true,
+        description:
+          'Set by the plugin while this order counts as a use of its coupon. Cleared on cancellation or refund.',
+      },
+    },
+    {
       name: 'trackingNumber',
       type: 'text',
       admin: {
@@ -387,19 +515,53 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
             })
 
             if (!result.valid) {
-              throw new ValidationError(
-                {
-                  collection: collection.slug,
-                  errors: [{ message: result.error || 'Coupon is not valid', path: 'coupon' }],
-                },
-                req.t,
-              )
+              throw orderError(collection.slug, 'coupon', result.error || 'Coupon is not valid', req)
             }
 
             data.discount = result.discount
             if (result.freeShipping) {
               data.shipping = 0
             }
+          }
+
+          if (operation === 'create') {
+            // An order created directly as cancelled or refunded never holds stock or a
+            // coupon use, so there is nothing to check, take or give back later.
+            const holds = !RELEASED_ORDER_STATUSES.includes(data.status ?? 'pending')
+
+            // Reject the order while nothing has been written yet when it asks for more
+            // units than are in stock. This read cannot see concurrent orders; the atomic
+            // stock update in afterChange is what settles a race for the last units.
+            const demand = holds
+              ? collectStockDemand(
+                  data.items || [],
+                  await loadLineProducts(req, productsSlug, data.items || []),
+                )
+              : []
+            for (const entry of demand) {
+              if (entry.available < entry.quantity) {
+                throw orderError(
+                  collection.slug,
+                  'items',
+                  describeStockShortage(entry.product, entry.lineVariant, entry.quantity, entry.available),
+                  req,
+                )
+              }
+            }
+
+            // These flags record what afterChange is about to do, so that a later
+            // cancellation gives back exactly what this order took. They are always set
+            // here; a value passed by the caller is replaced.
+            data.inventoryReduced = demand.length > 0
+            data.couponUsageCounted = holds && couponId !== undefined
+          } else if (operation === 'update') {
+            // On update the flags only change in one way: moving the order to cancelled or
+            // refunded clears them, and afterChange then puts the stock and coupon use back.
+            // Because they are cleared in the same save, a later update finds nothing left
+            // to give back. Reopening a cancelled order does not take stock again.
+            const released = RELEASED_ORDER_STATUSES.includes(data.status ?? originalDoc?.status)
+            data.inventoryReduced = released ? false : Boolean(originalDoc?.inventoryReduced)
+            data.couponUsageCounted = released ? false : Boolean(originalDoc?.couponUsageCounted)
           }
 
           // Payload fills `data` with the stored value of every field the caller left out
@@ -455,36 +617,120 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
         },
       ],
       afterChange: [
-        async ({ doc, operation, req }) => {
+        async ({ collection, doc, operation, previousDoc, req }) => {
           if (operation === 'create') {
-            const productHelpers = createProductHelpers(req.payload, productsSlug)
+            // Everything this order took, so it can be given back if a later step fails.
+            const takenStock: StockDemand[] = []
+            let countedCouponId: DocumentId | undefined
 
-            for (const item of doc.items || []) {
-              const productId = getRelationshipId(item.product)
-              if (productId === undefined) {
-                continue
-              }
-              try {
-                await productHelpers.reduceInventory(productId, item.quantity, item.variant)
-              } catch (error) {
-                req.payload.logger.error(`Failed to reduce inventory for product ${productId}: ${error}`)
-              }
-            }
+            try {
+              if (doc.inventoryReduced) {
+                const demand = collectStockDemand(
+                  doc.items || [],
+                  await loadLineProducts(req, productsSlug, doc.items || []),
+                )
 
-            if (doc.coupon) {
-              const couponHelpers = createCouponHelpers(req.payload, couponsSlug)
-              const couponId = getRelationshipId(doc.coupon)
-              try {
-                if (couponId !== undefined) {
-                  await couponHelpers.incrementCouponUsage(couponId)
+                for (const entry of demand) {
+                  const taken = await adjustStock(req.payload, {
+                    delta: -entry.quantity,
+                    productId: entry.productId,
+                    productsSlug,
+                    req,
+                    variant: entry.variant,
+                  })
+
+                  if (!taken) {
+                    // Another order took the units between the check in beforeChange and
+                    // this update. `available` was read before that, so it is not repeated.
+                    throw orderError(
+                      collection.slug,
+                      'items',
+                      describeStockShortage(entry.product, entry.lineVariant, entry.quantity),
+                      req,
+                    )
+                  }
+                  takenStock.push(entry)
                 }
-              } catch (error) {
-                req.payload.logger.error(`Failed to increment coupon usage: ${error}`)
+              }
+
+              const couponId = doc.couponUsageCounted ? getRelationshipId(doc.coupon) : undefined
+              if (couponId !== undefined) {
+                const counted = await adjustCouponUsage(req.payload, {
+                  couponId,
+                  couponsSlug,
+                  delta: 1,
+                  req,
+                })
+
+                if (!counted) {
+                  throw orderError(collection.slug, 'coupon', 'Coupon usage limit reached', req)
+                }
+                countedCouponId = couponId
+              }
+
+              if (config.hooks?.afterCreateOrder) {
+                await config.hooks.afterCreateOrder(doc)
+              }
+            } catch (error) {
+              // The order must not exist when any of its side effects failed. Inside a
+              // transaction, rethrowing makes Payload roll back the order together with
+              // the updates above. Without one (the SQLite adapter's default) nothing is
+              // rolled back, so the updates are undone and the order row is deleted here.
+              if (!(await hasActiveTransaction(req.payload, req))) {
+                for (const entry of takenStock) {
+                  await adjustStock(req.payload, {
+                    delta: entry.quantity,
+                    productId: entry.productId,
+                    productsSlug,
+                    req,
+                    variant: entry.variant,
+                  })
+                }
+                if (countedCouponId !== undefined) {
+                  await adjustCouponUsage(req.payload, {
+                    couponId: countedCouponId,
+                    couponsSlug,
+                    delta: -1,
+                    req,
+                  })
+                }
+                await req.payload.db.deleteOne({
+                  collection: collection.slug,
+                  req,
+                  where: { id: { equals: doc.id } },
+                })
+              }
+
+              throw error
+            }
+          }
+
+          if (operation === 'update') {
+            // beforeChange cleared a flag in this save: the order moved to cancelled or
+            // refunded while it still held stock or a coupon use. What is given back is
+            // what the order held before this save, hence previousDoc.
+            if (previousDoc?.inventoryReduced && !doc.inventoryReduced) {
+              const demand = collectStockDemand(
+                previousDoc.items || [],
+                await loadLineProducts(req, productsSlug, previousDoc.items || []),
+              )
+
+              for (const entry of demand) {
+                await adjustStock(req.payload, {
+                  delta: entry.quantity,
+                  productId: entry.productId,
+                  productsSlug,
+                  req,
+                  variant: entry.variant,
+                })
               }
             }
 
-            if (config.hooks?.afterCreateOrder) {
-              await config.hooks.afterCreateOrder(doc)
+            if (previousDoc?.couponUsageCounted && !doc.couponUsageCounted) {
+              const couponId = getRelationshipId(previousDoc.coupon)
+              if (couponId !== undefined) {
+                await adjustCouponUsage(req.payload, { couponId, couponsSlug, delta: -1, req })
+              }
             }
           }
 

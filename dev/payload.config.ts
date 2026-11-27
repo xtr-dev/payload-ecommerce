@@ -52,6 +52,13 @@ export default buildConfig({
   plugins: [
     payloadEcommerce({
       hooks: {
+        // Used by the integration tests to check that a failing afterCreateOrder hook
+        // leaves no order and no stock change behind. Real orders never carry this note.
+        afterCreateOrder: async (order) => {
+          if (order.notes === 'test: fail in afterCreateOrder') {
+            throw new Error('afterCreateOrder failed');
+          }
+        },
         // Example tax calculation hook - calculates 10% tax on taxable amount
         calculateTax: async (orderData) => {
           // You can implement complex logic here based on:

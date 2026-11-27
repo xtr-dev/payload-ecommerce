@@ -488,9 +488,8 @@ describe('Ecommerce Plugin integration tests', () => {
       },
       {
         name: 'a coupon whose usage limit is reached',
-        // The coupons collection marks such a coupon expired when it is saved.
         data: { usageCount: 3, usageLimit: 3 },
-        error: 'not active',
+        error: 'usage limit reached',
       },
       { name: 'a cart below the minimum purchase', data: { minPurchase: 500 }, error: 'Minimum purchase' },
     ])('an order with $name is rejected', async ({ data, error, name }) => {
@@ -628,6 +627,334 @@ describe('Ecommerce Plugin integration tests', () => {
       // A rejected order leaves the cart as it was.
       const cartAfter = await payload.findByID({ id: secondCart.id, collection: 'carts' })
       expect(cartAfter.items).toHaveLength(1)
+    })
+  })
+
+  // Stock and coupon usage are changed with one conditional database statement per order
+  // line (see src/lib/atomic.ts). The test database is SQLite without transactions, so a
+  // failed order is cleaned up by the plugin itself rather than by a rollback.
+  describe('order side effects', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+      postalCode: '1000 AA',
+      state: 'NH',
+    }
+
+    const createProduct = async (title: string, extra: Record<string, unknown> = {}) =>
+      await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'active', title, ...extra },
+      })
+
+    const tracked = (quantity: number) => ({ inventory: { quantity, trackQuantity: true } })
+
+    type Line = { product: { id: number | string }; quantity: number; variant?: string }
+
+    const createOrder = async (lines: Line[], extra: Record<string, unknown> = {}) =>
+      await payload.create({
+        collection: 'orders',
+        data: {
+          billingAddress: address,
+          items: lines.map(({ product, quantity, variant }) => ({
+            price: 10,
+            product: product.id,
+            quantity,
+            total: 10 * quantity,
+            variant,
+          })),
+          shippingAddress: address,
+          subtotal: lines.reduce((sum, line) => sum + 10 * line.quantity, 0),
+          ...extra,
+        },
+      })
+
+    const stockOf = async (product: { id: number | string }) =>
+      (await payload.findByID({ id: product.id, collection: 'products' })).inventory.quantity
+
+    const variantStockOf = async (product: { id: number | string }, name: string) =>
+      (await payload.findByID({ id: product.id, collection: 'products' })).variants.find(
+        (variant: { name: string }) => variant.name === name,
+      ).inventory
+
+    const ordersContaining = async (product: { id: number | string }) =>
+      (
+        await payload.count({
+          collection: 'orders',
+          where: { 'items.product': { equals: product.id } },
+        })
+      ).totalDocs
+
+    test('an order for more than the stock is rejected, names the product and changes nothing', async () => {
+      const plenty = await createProduct('Stock Plenty Product', tracked(5))
+      const scarce = await createProduct('Stock Scarce Product', tracked(2))
+
+      await expect(
+        createOrder([
+          { product: plenty, quantity: 1 },
+          { product: scarce, quantity: 3 },
+        ]),
+      ).rejects.toMatchObject({
+        data: {
+          errors: [
+            {
+              message: 'Not enough stock for "Stock Scarce Product": 3 requested, 2 available',
+              path: 'items',
+            },
+          ],
+        },
+        name: 'ValidationError',
+      })
+
+      expect(await stockOf(plenty)).toBe(5)
+      expect(await stockOf(scarce)).toBe(2)
+      expect(await ordersContaining(scarce)).toBe(0)
+    })
+
+    test('two lines for the same product are checked together', async () => {
+      const product = await createProduct('Stock Split Lines Product', tracked(3))
+
+      await expect(
+        createOrder([
+          { product, quantity: 2 },
+          { product, quantity: 2 },
+        ]),
+      ).rejects.toThrow('4 requested, 3 available')
+      expect(await stockOf(product)).toBe(3)
+
+      const order = await createOrder([
+        { product, quantity: 2 },
+        { product, quantity: 1 },
+      ])
+      expect(order.inventoryReduced).toBe(true)
+      expect(await stockOf(product)).toBe(0)
+    })
+
+    test('a product that does not track its quantity can always be ordered', async () => {
+      const product = await createProduct('Stock Untracked Product', {
+        inventory: { quantity: 0, trackQuantity: false },
+      })
+
+      const order = await createOrder([{ product, quantity: 50 }])
+
+      expect(order.inventoryReduced).toBe(false)
+      expect(await stockOf(product)).toBe(0)
+    })
+
+    test('a variant with its own inventory is checked and reduced on its own', async () => {
+      const product = await createProduct('Stock Variant Product', {
+        ...tracked(10),
+        variants: [
+          { name: 'Small', inventory: 1 },
+          { name: 'Large', inventory: 4 },
+          // No inventory number of its own: draws from the product's quantity.
+          { name: "Collector's" },
+        ],
+      })
+
+      await expect(createOrder([{ product, quantity: 2, variant: 'Small' }])).rejects.toThrow(
+        'Not enough stock for "Stock Variant Product" (variant "Small"): 2 requested, 1 available',
+      )
+
+      await createOrder([
+        { product, quantity: 3, variant: 'Large' },
+        { product, quantity: 2, variant: "Collector's" },
+      ])
+
+      expect(await variantStockOf(product, 'Small')).toBe(1)
+      expect(await variantStockOf(product, 'Large')).toBe(1)
+      expect(await stockOf(product)).toBe(8)
+    })
+
+    test('two concurrent orders for the last unit: exactly one succeeds', async () => {
+      const product = await createProduct('Stock Last Unit Product', tracked(1))
+
+      const results = await Promise.allSettled([
+        createOrder([{ product, quantity: 1 }]),
+        createOrder([{ product, quantity: 1 }]),
+      ])
+
+      expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected'])
+      const rejected = results.find((result) => result.status === 'rejected') as PromiseRejectedResult
+      expect(rejected.reason.data.errors[0].message).toContain(
+        'Not enough stock for "Stock Last Unit Product"',
+      )
+      expect(await stockOf(product)).toBe(0)
+      // The losing order is not left behind.
+      expect(await ordersContaining(product)).toBe(1)
+    })
+
+    test('many concurrent orders never take more than the stock', async () => {
+      const product = await createProduct('Stock Rush Product', tracked(3))
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () => createOrder([{ product, quantity: 1 }])),
+      )
+
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(3)
+      expect(await stockOf(product)).toBe(0)
+      expect(await ordersContaining(product)).toBe(3)
+    })
+
+    test('an order that loses the race on its second line gives back the first line', async () => {
+      const plenty = await createProduct('Stock Race Plenty Product', tracked(10))
+      const last = await createProduct('Stock Race Last Product', tracked(1))
+
+      const results = await Promise.allSettled([
+        createOrder([
+          { product: plenty, quantity: 2 },
+          { product: last, quantity: 1 },
+        ]),
+        createOrder([
+          { product: plenty, quantity: 2 },
+          { product: last, quantity: 1 },
+        ]),
+      ])
+
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      expect(await stockOf(plenty)).toBe(8)
+      expect(await stockOf(last)).toBe(0)
+    })
+
+    test('concurrent orders cannot take a coupon past its usage limit', async () => {
+      const product = await createProduct('Coupon Race Product', tracked(10))
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'RACEONCE', status: 'active', type: 'fixed', usageLimit: 1, value: 1 },
+      })
+
+      const results = await Promise.allSettled([
+        createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
+        createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
+        createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
+      ])
+
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      const couponAfter = await payload.findByID({ id: coupon.id, collection: 'coupons' })
+      expect(couponAfter.usageCount).toBe(1)
+      // The rejected orders gave their stock back and were removed.
+      expect(await stockOf(product)).toBe(9)
+      expect(await ordersContaining(product)).toBe(1)
+    })
+
+    // The dev config's afterCreateOrder hook throws for this note.
+    test('an order whose afterCreateOrder hook fails is not created and takes nothing', async () => {
+      const product = await createProduct('Failing Hook Product', tracked(5))
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'FAILINGHOOK', status: 'active', type: 'fixed', value: 1 },
+      })
+
+      await expect(
+        createOrder([{ product, quantity: 2 }], {
+          coupon: coupon.id,
+          notes: 'test: fail in afterCreateOrder',
+        }),
+      ).rejects.toThrow('afterCreateOrder failed')
+
+      expect(await stockOf(product)).toBe(5)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(0)
+      expect(await ordersContaining(product)).toBe(0)
+    })
+
+    test.each(['cancelled', 'refunded'] as const)(
+      'moving an order to %s restores stock and the coupon use exactly once',
+      async (status) => {
+        const product = await createProduct(`Restore Product ${status}`, {
+          ...tracked(10),
+          variants: [{ name: 'Blue', inventory: 5 }],
+        })
+        const coupon = await payload.create({
+          collection: 'coupons',
+          data: { code: `RESTORE-${status}`, status: 'active', type: 'fixed', usageLimit: 1, value: 1 },
+        })
+
+        const order = await createOrder(
+          [
+            { product, quantity: 4 },
+            { product, quantity: 2, variant: 'Blue' },
+          ],
+          { coupon: coupon.id },
+        )
+        expect(order).toMatchObject({ couponUsageCounted: true, inventoryReduced: true })
+        expect(await stockOf(product)).toBe(6)
+        expect(await variantStockOf(product, 'Blue')).toBe(3)
+
+        // An update that keeps the order open changes nothing.
+        await payload.update({ id: order.id, collection: 'orders', data: { status: 'processing' } })
+        expect(await stockOf(product)).toBe(6)
+
+        const released = await payload.update({
+          id: order.id,
+          collection: 'orders',
+          data: { status },
+        })
+        expect(released).toMatchObject({ couponUsageCounted: false, inventoryReduced: false })
+        expect(await stockOf(product)).toBe(10)
+        expect(await variantStockOf(product, 'Blue')).toBe(5)
+        expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(0)
+
+        // Later updates, including a second cancellation or a refund of the cancelled
+        // order, must not put the stock back again.
+        await payload.update({ id: order.id, collection: 'orders', data: { notes: 'called customer' } })
+        await payload.update({ id: order.id, collection: 'orders', data: { status: 'refunded' } })
+        await payload.update({ id: order.id, collection: 'orders', data: { status: 'cancelled' } })
+        // A caller cannot make the order look like it holds stock again.
+        await payload.update({
+          id: order.id,
+          collection: 'orders',
+          data: { inventoryReduced: true, status: 'cancelled' },
+        })
+        // Reopening does not take stock again, so cancelling once more gives nothing back.
+        await payload.update({ id: order.id, collection: 'orders', data: { status: 'pending' } })
+        await payload.update({ id: order.id, collection: 'orders', data: { status: 'cancelled' } })
+
+        expect(await stockOf(product)).toBe(10)
+        expect(await variantStockOf(product, 'Blue')).toBe(5)
+        expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(0)
+
+        // The coupon use that was given back can be used by another order.
+        const next = await createOrder([{ product, quantity: 1 }], { coupon: coupon.id })
+        expect(next.couponUsageCounted).toBe(true)
+      },
+    )
+
+    test('an order whose stock was never reduced restores nothing when cancelled', async () => {
+      const product = await createProduct('Never Reduced Product', tracked(5))
+
+      // Created as cancelled: it never held stock, even with a caller claiming it did.
+      const order = await createOrder([{ product, quantity: 2 }], {
+        inventoryReduced: true,
+        status: 'cancelled',
+      })
+      expect(order.inventoryReduced).toBe(false)
+      expect(await stockOf(product)).toBe(5)
+
+      await payload.update({ id: order.id, collection: 'orders', data: { status: 'refunded' } })
+      expect(await stockOf(product)).toBe(5)
+    })
+
+    test('reduceInventory throws instead of clamping at zero, restoreInventory adds back', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Helper Stock Product', tracked(2))
+
+      await expect(ecommerce.products.reduceInventory(product.id, 3)).rejects.toThrow(
+        'Not enough stock for "Helper Stock Product": 3 requested, 2 available',
+      )
+      expect(await stockOf(product)).toBe(2)
+
+      const reduced = await ecommerce.products.reduceInventory(product.id, 2)
+      expect(reduced.inventory.quantity).toBe(0)
+      expect(await ecommerce.products.checkInventory(product.id, 1)).toEqual({
+        available: false,
+        quantity: 0,
+      })
+
+      const restored = await ecommerce.products.restoreInventory(product.id, 4)
+      expect(restored.inventory.quantity).toBe(4)
     })
   })
 

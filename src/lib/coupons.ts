@@ -2,6 +2,7 @@ import type { Payload, PayloadRequest } from 'payload'
 
 import type { DocumentId } from './relationships.js'
 
+import { adjustCouponUsage } from './atomic.js'
 import { isSameDocument } from './relationships.js'
 
 export interface ValidateCouponParams {
@@ -36,6 +37,11 @@ export interface EvaluateCouponParams extends Omit<ValidateCouponParams, 'code'>
   req?: PayloadRequest
 }
 
+/**
+ * Order statuses in which an order no longer holds its stock or its use of a coupon.
+ */
+export const RELEASED_ORDER_STATUSES = ['cancelled', 'refunded']
+
 const rejected = (error: string): ApplyCouponResult => ({
   valid: false,
   discount: 0,
@@ -52,7 +58,8 @@ const rejected = (error: string): ApplyCouponResult => ({
  *
  * Rules, in order: status must be `active`; now must be within `validFrom`/`validUntil`;
  * `usageCount` must be below `usageLimit`; the customer's orders with this coupon must be
- * below `customerLimit` (only checked when `userId` is given); `cartTotal` must reach
+ * below `customerLimit` (only checked when `userId` is given; cancelled and refunded orders
+ * do not count); `cartTotal` must reach
  * `minPurchase`; and when the coupon is restricted to products and/or categories, the
  * cart must contain at least one matching product for each restriction that is set.
  * A limit of 0 or an empty restriction means "no limit".
@@ -99,7 +106,12 @@ export const evaluateCoupon = async (
       collection: ordersSlug,
       req,
       where: {
-        and: [{ user: { equals: userId } }, { coupon: { equals: coupon.id } }],
+        and: [
+          { user: { equals: userId } },
+          { coupon: { equals: coupon.id } },
+          // A cancelled or refunded order gave its use of the coupon back.
+          { status: { not_in: RELEASED_ORDER_STATUSES } },
+        ],
       },
     })
 
@@ -198,23 +210,35 @@ export const createCouponHelpers = (
     return await validateCoupon({ code, cartTotal, userId, productIds, categoryIds })
   }
 
-  const incrementCouponUsage = async (couponId: DocumentId) => {
-    const coupon = await payload.findByID({
-      collection: couponsSlug,
-      id: couponId,
+  /**
+   * Counts one use of a coupon in a single atomic step (see `adjustCouponUsage`) and
+   * returns the coupon. Throws when the coupon's `usageLimit` is already reached or the
+   * coupon does not exist. The orders collection calls this for every order created with a
+   * coupon, so call it yourself only for uses that are not orders.
+   */
+  const incrementCouponUsage = async (couponId: DocumentId, options: { req?: PayloadRequest } = {}) => {
+    const counted = await adjustCouponUsage(payload, {
+      couponId,
+      couponsSlug,
+      delta: 1,
+      req: options.req,
     })
 
-    if (!coupon) {
-      throw new Error('Coupon not found')
+    if (!counted) {
+      throw new Error('Coupon not found or its usage limit is reached')
     }
 
-    return await payload.update({
-      collection: couponsSlug,
-      id: couponId,
-      data: {
-        usageCount: (coupon.usageCount || 0) + 1,
-      },
-    })
+    return await payload.findByID({ id: couponId, collection: couponsSlug, depth: 0, req: options.req })
+  }
+
+  /**
+   * Gives back one use of a coupon (never below 0) and returns the coupon. The orders
+   * collection calls this when an order with a coupon is cancelled or refunded.
+   */
+  const decrementCouponUsage = async (couponId: DocumentId, options: { req?: PayloadRequest } = {}) => {
+    await adjustCouponUsage(payload, { couponId, couponsSlug, delta: -1, req: options.req })
+
+    return await payload.findByID({ id: couponId, collection: couponsSlug, depth: 0, req: options.req })
   }
 
   return {
@@ -222,5 +246,6 @@ export const createCouponHelpers = (
     validateCoupon,
     applyCoupon,
     incrementCouponUsage,
+    decrementCouponUsage,
   }
 }
