@@ -1,7 +1,9 @@
 import type { Payload, PayloadRequest } from 'payload'
 
+import type { HelperAccessOptions } from './access.js'
 import type { DocumentId } from './relationships.js'
 
+import { resolveLocalApiAccess } from './access.js'
 import { adjustStock } from './atomic.js'
 
 export interface GetProductsParams {
@@ -70,9 +72,18 @@ export const describeStockShortage = (
   return `Not enough stock for ${name}${variantPart}: ${requested} requested${availablePart}`
 }
 
-export const createProductHelpers = (payload: Payload, productsSlug = 'products') => {
+export const createProductHelpers = (
+  payload: Payload,
+  productsSlug = 'products',
+  accessOptions: HelperAccessOptions = {},
+) => {
+  // getProduct and getProducts read on behalf of the caller; the inventory helpers are
+  // stock bookkeeping and always bypass access control.
+  const { caller, trusted } = resolveLocalApiAccess(accessOptions)
+
   const getProduct = async (id: DocumentId) => {
     return await payload.findByID({
+      ...caller,
       collection: productsSlug,
       id,
       depth: 2,
@@ -125,6 +136,7 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
     }
 
     return await payload.find({
+      ...caller,
       collection: productsSlug,
       where,
       limit,
@@ -135,11 +147,12 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
 
   const loadProduct = async (productId: DocumentId, req?: PayloadRequest) => {
     const product = await payload.findByID({
+      ...trusted,
       id: productId,
       collection: productsSlug,
       depth: 0,
       disableErrors: true,
-      req,
+      req: req ?? trusted.req,
     })
 
     if (!product) {
@@ -187,7 +200,7 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
       delta: -quantity,
       productId,
       productsSlug,
-      req: options.req,
+      req: options.req ?? trusted.req,
       variant: target.variant,
     })
 
@@ -219,7 +232,7 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
       delta: quantity,
       productId,
       productsSlug,
-      req: options.req,
+      req: options.req ?? trusted.req,
       variant: target.variant,
     })
 

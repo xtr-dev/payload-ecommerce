@@ -1,6 +1,7 @@
 import type { Payload } from 'payload'
 
 import config from '@payload-config'
+import { REST_GET, REST_PATCH, REST_POST } from '@payloadcms/next/routes'
 import { getPayload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
@@ -13,6 +14,7 @@ import {
   getRelationshipId,
   isCartExpired,
   isSameCartLine,
+  defaultIsAdmin,
   payloadEcommerce,
   resolveUnitPrice,
   slugify,
@@ -1959,6 +1961,432 @@ describe('Ecommerce Plugin integration tests', () => {
         code: 'CATEGORYONLY',
       })
       expect(doesNotApply.valid).toBe(false)
+    })
+  })
+
+  describe('default access control', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+      postalCode: '1000 AA',
+      state: 'NH',
+    }
+
+    // Unique per run so the block can be repeated against a database that is kept.
+    const run = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+    const password = 'access-test-password'
+
+    let admin: any
+    let alice: any
+    let bob: any
+    let activeProduct: any
+    let draftProduct: any
+    let coupon: any
+    let aliceCart: any
+    let bobCart: any
+    let guestCart: any
+    let aliceOrder: any
+    let bobOrder: any
+    let guestOrder: any
+
+    /** Calls the REST API the way the Next.js route handler does, optionally signed in. */
+    const rest = async (
+      method: 'GET' | 'PATCH' | 'POST',
+      path: string,
+      { body, user }: { body?: unknown; user?: { email: string } } = {},
+    ): Promise<{ json: any; status: number }> => {
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      if (user) {
+        const { token } = await payload.login({
+          collection: 'users',
+          data: { email: user.email, password },
+        })
+        headers.set('Authorization', `JWT ${token}`)
+      }
+
+      const handler = { GET: REST_GET, PATCH: REST_PATCH, POST: REST_POST }[method](config)
+      const [pathname] = path.split('?')
+      const response = await handler(
+        new Request(`http://localhost:3000/api/${path}`, {
+          body: body === undefined ? undefined : JSON.stringify(body),
+          headers,
+          method,
+        }),
+        { params: Promise.resolve({ slug: pathname.split('/') }) },
+      )
+
+      return { json: await response.json().catch(() => null), status: response.status }
+    }
+
+    const ids = (docs: Array<{ id: unknown }>) => docs.map((doc) => String(doc.id))
+
+    beforeAll(async () => {
+      const createUser = async (name: string, role: 'admin' | 'customer') =>
+        await payload.create({
+          collection: 'users',
+          data: { email: `${name}-${run}@example.com`, password, role },
+        })
+      admin = await createUser('admin', 'admin')
+      alice = await createUser('alice', 'customer')
+      bob = await createUser('bob', 'customer')
+
+      activeProduct = await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'active', title: `Access Active ${run}` },
+      })
+      draftProduct = await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'draft', title: `Access Draft ${run}` },
+      })
+      coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: `ACCESS${run.replace(/\D/g, '')}`, status: 'active', type: 'percentage', value: 10 },
+      })
+
+      const items = [{ product: activeProduct.id, quantity: 1 }]
+      aliceCart = await payload.create({ collection: 'carts', data: { items, user: alice.id } })
+      bobCart = await payload.create({ collection: 'carts', data: { items, user: bob.id } })
+      guestCart = await payload.create({
+        collection: 'carts',
+        data: { items, sessionId: `access-guest-${run}` },
+      })
+
+      const createOrder = async (user?: unknown) =>
+        await payload.create({
+          collection: 'orders',
+          data: {
+            items: [{ price: 10, product: activeProduct.id, quantity: 1, total: 10 }],
+            billingAddress: address,
+            shippingAddress: address,
+            subtotal: 10,
+            user,
+          },
+        })
+      aliceOrder = await createOrder(alice.id)
+      bobOrder = await createOrder(bob.id)
+      guestOrder = await createOrder()
+    })
+
+    test('the default admin check accepts role or roles "admin" and denies everyone else', () => {
+      const check = (user: unknown) => defaultIsAdmin({ req: { user } as any })
+
+      expect(check({ id: 1, role: 'admin' })).toBe(true)
+      expect(check({ id: 1, roles: ['editor', 'admin'] })).toBe(true)
+      expect(check({ id: 1, role: 'customer' })).toBe(false)
+      expect(check({ id: 1, roles: ['editor'] })).toBe(false)
+      // A users collection without a role field: nobody is an admin.
+      expect(check({ id: 1 })).toBe(false)
+      expect(check(null)).toBe(false)
+    })
+
+    test('every plugin collection defines access for create, read, update and delete', () => {
+      for (const slug of ['products', 'categories', 'coupons', 'orders', 'carts']) {
+        const { access } = payload.collections[slug].config
+        // Payload's own default (any signed-in user) is a function named defaultAccess.
+        for (const operation of ['create', 'read', 'update', 'delete'] as const) {
+          expect(access[operation].name, `${slug}.${operation}`).not.toBe('defaultAccess')
+        }
+      }
+    })
+
+    describe('Local API with overrideAccess: false', () => {
+      const as = (user: any) => ({ overrideAccess: false, user: { ...user, collection: 'users' } })
+
+      test('anonymous visitors read active products and categories only', async () => {
+        const products = await payload.find({
+          collection: 'products',
+          overrideAccess: false,
+          where: { id: { in: [activeProduct.id, draftProduct.id] } },
+        })
+        expect(ids(products.docs)).toEqual([String(activeProduct.id)])
+
+        await expect(
+          payload.find({ collection: 'categories', overrideAccess: false }),
+        ).resolves.toBeDefined()
+
+        for (const collection of ['coupons', 'orders', 'carts']) {
+          await expect(payload.find({ collection, overrideAccess: false }), collection).rejects.toThrow(
+            /not allowed/i,
+          )
+        }
+      })
+
+      test('a customer cannot write products, categories or coupons, an admin can', async () => {
+        const productData = { price: 1, status: 'active', title: `Access Write ${run}` }
+
+        await expect(
+          payload.create({ collection: 'products', data: productData, ...as(alice) }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(
+          payload.update({ id: activeProduct.id, collection: 'products', data: { price: 0 }, ...as(alice) }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(
+          payload.delete({ id: activeProduct.id, collection: 'products', ...as(alice) }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(
+          payload.create({ collection: 'categories', data: { name: `Access ${run}` }, ...as(alice) }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(
+          payload.create({
+            collection: 'coupons',
+            data: { code: `FREE${run}`, type: 'percentage', value: 100 },
+            ...as(alice),
+          }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(payload.find({ collection: 'coupons', ...as(alice) })).rejects.toThrow(/not allowed/i)
+
+        const created = await payload.create({ collection: 'products', data: productData, ...as(admin) })
+        expect(created.title).toBe(productData.title)
+        const drafts = await payload.find({
+          collection: 'products',
+          where: { id: { equals: draftProduct.id } },
+          ...as(admin),
+        })
+        expect(drafts.docs).toHaveLength(1)
+        const coupons = await payload.find({ collection: 'coupons', ...as(admin) })
+        expect(ids(coupons.docs)).toContain(String(coupon.id))
+      })
+
+      test('a customer reads only their own orders and cannot write orders', async () => {
+        const orders = await payload.find({ collection: 'orders', limit: 1000, ...as(alice) })
+        expect(ids(orders.docs)).toEqual([String(aliceOrder.id)])
+
+        await expect(
+          payload.findByID({ id: bobOrder.id, collection: 'orders', ...as(alice) }),
+        ).rejects.toThrow()
+        await expect(
+          payload.findByID({ id: guestOrder.id, collection: 'orders', ...as(alice) }),
+        ).rejects.toThrow()
+        await expect(
+          payload.update({ id: aliceOrder.id, collection: 'orders', data: { paymentStatus: 'paid' }, ...as(alice) }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(
+          payload.create({
+            collection: 'orders',
+            data: {
+              items: [{ price: 0, product: activeProduct.id, quantity: 1, total: 0 }],
+              billingAddress: address,
+              shippingAddress: address,
+              subtotal: 0,
+              user: alice.id,
+            },
+            ...as(alice),
+          }),
+        ).rejects.toThrow(/not allowed/i)
+
+        const all = await payload.find({ collection: 'orders', limit: 1000, ...as(admin) })
+        expect(ids(all.docs)).toEqual(
+          expect.arrayContaining([String(aliceOrder.id), String(bobOrder.id), String(guestOrder.id)]),
+        )
+      })
+
+      test('a customer reads and updates only their own cart; guest carts need an admin', async () => {
+        const carts = await payload.find({ collection: 'carts', limit: 1000, ...as(alice) })
+        expect(ids(carts.docs)).toEqual([String(aliceCart.id)])
+
+        const updated = await payload.update({
+          id: aliceCart.id,
+          collection: 'carts',
+          data: { items: [{ product: activeProduct.id, quantity: 3 }] },
+          ...as(alice),
+        })
+        expect(updated.items[0].quantity).toBe(3)
+
+        for (const cart of [bobCart, guestCart]) {
+          await expect(
+            payload.findByID({ id: cart.id, collection: 'carts', ...as(alice) }),
+          ).rejects.toThrow()
+          await expect(
+            payload.update({ id: cart.id, collection: 'carts', data: { items: [] }, ...as(alice) }),
+          ).rejects.toThrow()
+        }
+
+        const all = await payload.find({ collection: 'carts', limit: 1000, ...as(admin) })
+        expect(ids(all.docs)).toEqual(
+          expect.arrayContaining([String(aliceCart.id), String(bobCart.id), String(guestCart.id)]),
+        )
+      })
+
+      test('a customer can create a cart for themselves only, and cannot give a cart away', async () => {
+        const items = [{ product: activeProduct.id, quantity: 1 }]
+
+        await expect(
+          payload.create({ collection: 'carts', data: { items, user: bob.id }, ...as(alice) }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(
+          payload.create({ collection: 'carts', data: { items, sessionId: 'someone-elses-session' }, ...as(alice) }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(
+          payload.create({ collection: 'carts', data: { items, sessionId: 'anonymous' }, overrideAccess: false }),
+        ).rejects.toThrow(/not allowed/i)
+
+        const own = await payload.create({ collection: 'carts', data: { items, user: alice.id }, ...as(alice) })
+        expect(getRelationshipId(own.user)).toBe(alice.id)
+
+        // The owner fields are ignored on a customer's update, so the cart stays theirs.
+        await payload.update({
+          id: own.id,
+          collection: 'carts',
+          data: { sessionId: 'planted', user: bob.id },
+          ...as(alice),
+        })
+        const stored = await payload.findByID({ id: own.id, collection: 'carts', depth: 0 })
+        expect(stored.user).toBe(alice.id)
+        expect(stored.sessionId ?? null).toBeNull()
+
+        await payload.delete({ id: own.id, collection: 'carts' })
+      })
+    })
+
+    describe('REST API', () => {
+      test('anonymous visitors get active products, and nothing from coupons, orders and carts', async () => {
+        const products = await rest('GET', 'products?limit=1000')
+        expect(products.status).toBe(200)
+        expect(ids(products.json.docs)).toContain(String(activeProduct.id))
+        expect(ids(products.json.docs)).not.toContain(String(draftProduct.id))
+        expect((await rest('GET', `products/${draftProduct.id}`)).status).toBe(404)
+
+        for (const collection of ['coupons', 'orders', 'carts']) {
+          expect((await rest('GET', collection)).status, collection).toBe(403)
+        }
+        expect((await rest('GET', `carts/${guestCart.id}`)).status).toBe(403)
+        expect((await rest('GET', `orders/${guestOrder.id}`)).status).toBe(403)
+        expect(
+          (await rest('POST', 'products', { body: { price: 1, title: `Anonymous ${run}` } })).status,
+        ).toBe(403)
+      })
+
+      test('a signed-in customer cannot write products or coupons or read coupons', async () => {
+        expect(
+          (await rest('POST', 'products', { body: { price: 1, title: `Customer ${run}` }, user: alice })).status,
+        ).toBe(403)
+        expect(
+          (await rest('PATCH', `products/${activeProduct.id}`, { body: { price: 0 }, user: alice })).status,
+        ).toBe(403)
+        expect(
+          (
+            await rest('POST', 'coupons', {
+              body: { code: `REST${run}`, type: 'percentage', value: 100 },
+              user: alice,
+            })
+          ).status,
+        ).toBe(403)
+        expect((await rest('GET', 'coupons', { user: alice })).status).toBe(403)
+
+        const stored = await payload.findByID({ id: activeProduct.id, collection: 'products' })
+        expect(stored.price).toBe(10)
+      })
+
+      test('a signed-in customer sees their own orders and carts, not those of others or guests', async () => {
+        const orders = await rest('GET', 'orders?limit=1000', { user: alice })
+        expect(orders.status).toBe(200)
+        expect(ids(orders.json.docs)).toEqual([String(aliceOrder.id)])
+
+        const carts = await rest('GET', 'carts?limit=1000', { user: alice })
+        expect(carts.status).toBe(200)
+        expect(ids(carts.json.docs)).toEqual([String(aliceCart.id)])
+
+        for (const path of [
+          `orders/${bobOrder.id}`,
+          `orders/${guestOrder.id}`,
+          `carts/${bobCart.id}`,
+          `carts/${guestCart.id}`,
+        ]) {
+          expect([403, 404], path).toContain((await rest('GET', path, { user: alice })).status)
+        }
+
+        expect(
+          (await rest('PATCH', `orders/${aliceOrder.id}`, { body: { paymentStatus: 'paid' }, user: alice })).status,
+        ).toBe(403)
+        expect(
+          [403, 404],
+        ).toContain((await rest('PATCH', `carts/${bobCart.id}`, { body: { items: [] }, user: alice })).status)
+
+        const order = await payload.findByID({ id: aliceOrder.id, collection: 'orders' })
+        expect(order.paymentStatus).toBe('pending')
+        const cart = await payload.findByID({ id: bobCart.id, collection: 'carts' })
+        expect(cart.items).toHaveLength(1)
+      })
+
+      test('an admin reads and writes everything', async () => {
+        const orders = await rest('GET', 'orders?limit=1000', { user: admin })
+        expect(ids(orders.json.docs)).toEqual(
+          expect.arrayContaining([String(aliceOrder.id), String(bobOrder.id), String(guestOrder.id)]),
+        )
+        expect((await rest('GET', `carts/${guestCart.id}`, { user: admin })).status).toBe(200)
+        expect((await rest('GET', `products/${draftProduct.id}`, { user: admin })).status).toBe(200)
+        expect((await rest('GET', 'coupons', { user: admin })).status).toBe(200)
+
+        const patched = await rest('PATCH', `orders/${bobOrder.id}`, {
+          body: { trackingNumber: 'TRACK-1' },
+          user: admin,
+        })
+        expect(patched.status).toBe(200)
+        expect(patched.json.doc.trackingNumber).toBe('TRACK-1')
+      })
+    })
+
+    describe('server helpers', () => {
+      test('by default the helpers bypass access control, so guest carts and checkout work', async () => {
+        const ecommerce = useEcommerce(payload)
+        const sessionId = `access-helper-guest-${run}`
+
+        const cart = await ecommerce.cart.addToCart({ productId: activeProduct.id, quantity: 2, sessionId })
+        expect((await ecommerce.cart.getCart(undefined, sessionId))?.id).toBe(cart.id)
+
+        const result = await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: coupon.code })
+        expect(result).toMatchObject({ discount: 2, valid: true })
+
+        const order = await ecommerce.orders.createOrderFromCart({
+          cartId: cart.id,
+          orderData: { couponCode: coupon.code, shippingAddress: address },
+        })
+        expect(order.subtotal).toBe(20)
+        expect(order.user ?? null).toBeNull()
+        expect((await ecommerce.orders.getOrder(order.id)).id).toBe(order.id)
+      })
+
+      test('with overrideAccess: false the helpers act as the given user', async () => {
+        const asAlice = useEcommerce(payload, {
+          overrideAccess: false,
+          user: { ...alice, collection: 'users' },
+        })
+
+        expect((await asAlice.cart.getCart(alice.id))?.id).toBe(aliceCart.id)
+        // Asking for someone else's cart or a guest cart finds nothing.
+        expect(await asAlice.cart.getCart(bob.id)).toBeNull()
+        expect(await asAlice.cart.getCart(undefined, `access-guest-${run}`)).toBeNull()
+        await expect(asAlice.cart.clearCart(bobCart.id)).rejects.toThrow()
+        await expect(asAlice.orders.getOrder(bobOrder.id)).rejects.toThrow()
+        expect(ids((await asAlice.orders.getUserOrders(bob.id)).docs)).toEqual([])
+        await expect(
+          asAlice.orders.updateOrderStatus({ orderId: aliceOrder.id, status: 'delivered' }),
+        ).rejects.toThrow(/not allowed/i)
+        await expect(asAlice.products.getProduct(draftProduct.id)).rejects.toThrow()
+
+        // Coupons are admin-only, but validating a code is what the helper is for.
+        expect((await asAlice.coupons.validateCoupon({ cartTotal: 20, code: coupon.code })).valid).toBe(true)
+
+        // Checking out someone else's cart fails; their own cart becomes an order even
+        // though a customer may not create orders through the API.
+        await expect(
+          asAlice.orders.createOrderFromCart({ cartId: bobCart.id, orderData: { shippingAddress: address } }),
+        ).rejects.toThrow()
+        const updated = await asAlice.cart.addToCart({ productId: activeProduct.id, quantity: 1, userId: alice.id })
+        expect(updated.id).toBe(aliceCart.id)
+        const order = await asAlice.orders.createOrderFromCart({
+          cartId: aliceCart.id,
+          orderData: { shippingAddress: address },
+        })
+        expect(getRelationshipId(order.user)).toBe(alice.id)
+        expect((await asAlice.orders.getOrder(order.id)).id).toBe(order.id)
+
+        const bobsCart = await payload.findByID({ id: bobCart.id, collection: 'carts' })
+        expect(bobsCart.items).toHaveLength(1)
+      })
     })
   })
 })

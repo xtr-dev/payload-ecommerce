@@ -126,6 +126,7 @@ const loadLineProducts = async (
       collection: productsSlug,
       depth: 0,
       disableErrors: true,
+      overrideAccess: true,
       req,
     })
     if (product) {
@@ -484,6 +485,7 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
               collection: couponsSlug,
               depth: 0,
               disableErrors: true,
+              overrideAccess: true,
               req,
             })
 
@@ -507,6 +509,7 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
                         collection: productsSlug,
                         depth: 0,
                         disableErrors: true,
+                        overrideAccess: true,
                         req,
                       })
                 for (const category of product?.categories || []) {

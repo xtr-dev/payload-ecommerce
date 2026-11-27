@@ -50,6 +50,47 @@ export default buildConfig({
 
 The plugin adds the five collections below. Orders and carts relate to a `users` collection, and products to a `media` collection, which your config has to provide.
 
+The collections are locked down by default: only an admin can manage them, and by default an admin is a user with `role: 'admin'`. Read [Access control](#access-control) before you open the admin panel.
+
+## Access control
+
+Every collection gets access rules, which apply to REST, GraphQL, the admin panel and Local API calls made with `overrideAccess: false`:
+
+| Collection | Everyone | Signed-in user | Admin |
+|------------|----------|----------------|-------|
+| products | read `active` products | same | read and write all |
+| categories | read | same | read and write all |
+| coupons | – | – | read and write all |
+| orders | – | read their own (`user` is them) | read and write all |
+| carts | – | read, create and update their own (`user` is them) | read and write all |
+
+- Guest carts (`sessionId`) and guest orders are not reachable through the API without an admin. A storefront reaches them on the server through `useEcommerce(payload)`.
+- Orders are created on the server (`createOrderFromCart`), not by customers through the API: whoever creates an order decides its prices.
+- Coupons cannot be listed or read by customers. Validate a code on the server with `ecommerce.coupons.validateCoupon`.
+- On a cart, only an admin can change `user` and `sessionId` after it is created.
+- "Signed-in user" is a user of `userCollection` (default `'users'`).
+
+**Who is an admin** is decided by the `isAdmin` option. The default accepts a signed-in user whose `role` is `'admin'` or whose `roles` array contains `'admin'`. If your users collection has neither field, nobody is an admin and the collections cannot be managed until you pass your own check:
+
+```typescript
+payloadEcommerce({
+  // Everyone in a separate `admins` auth collection manages the shop
+  isAdmin: ({ req }) => req.user?.collection === 'admins',
+})
+```
+
+If you rely on a `role` field, protect it with field access so customers cannot change their own role.
+
+To change a rule for one collection, set `access` in a collection extender; it receives the collection with the defaults already applied:
+
+```typescript
+payloadEcommerce({
+  collections: {
+    products: (base) => ({ ...base, access: { ...base.access, read: () => true } }),
+  },
+})
+```
+
 ## Collections
 
 ### Products
@@ -89,6 +130,7 @@ import { getPayload } from 'payload'
 import { useEcommerce } from '@xtr-dev/payload-ecommerce'
 
 const payload = await getPayload({ config })
+// Trusted server code: bypasses access control (see "Helpers and access control" below)
 const ecommerce = useEcommerce(payload)
 
 // Add to cart
@@ -126,6 +168,22 @@ import { getRelationshipId } from '@xtr-dev/payload-ecommerce'
 
 const productIds = cart.items.map((item) => getRelationshipId(item.product))
 ```
+
+### Helpers and access control
+
+`useEcommerce(payload)` bypasses the collections' access rules (`overrideAccess: true`). That is what a storefront needs for guest carts and for creating orders, and it means your server code decides whose cart or order is touched: only pass ids (`userId`, `sessionId`, `cartId`, `orderId`) that belong to the visitor, for example a session id read from your own cookie.
+
+To have the helpers enforce the access rules for a signed-in user instead, pass the user (or the request) with `overrideAccess: false`:
+
+```typescript
+const ecommerce = useEcommerce(payload, { overrideAccess: false, user })
+// or: useEcommerce(payload, { overrideAccess: false, req })
+
+await ecommerce.cart.getCart(user.id)       // their cart
+await ecommerce.orders.getOrder(orderId)    // throws unless it is their order
+```
+
+In that mode cart, order and product reads, cart changes and `updateOrderStatus` run as that user. `createOrderFromCart` reads the cart as the user, so it only works on their own cart, and then creates the order with full access. Coupon validation and the inventory helpers always run with full access. A `req` passed without `overrideAccess: false` is only used to join its transaction.
 
 ### Prices
 
@@ -351,7 +409,7 @@ The helpers `ecommerce.products.checkInventory`, `reduceInventory` (throws when 
 
 ## Not implemented yet
 
-The plugin's option type also lists `payments`, `emails`, `shipping`, `userCollection`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are accepted but have no effect yet. The options that work are `collections`, `cartCleanupTask` and the hooks `calculateTax`, `beforeCreateOrder` and `afterCreateOrder`.
+The plugin's option type also lists `payments`, `emails`, `shipping`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are accepted but have no effect yet. `userCollection` is only used by the access rules; the `user` relationships still point at `users`. The options that work are `collections`, `isAdmin`, `cartCleanupTask` and the hooks `calculateTax`, `beforeCreateOrder` and `afterCreateOrder`.
 
 The `@xtr-dev/payload-ecommerce/client` hooks (`useCart`, `useProducts`, `useOrders`) call cart and order endpoints that the plugin does not register; they only work against routes like the ones in the demo app.
 

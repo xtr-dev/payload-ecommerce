@@ -4,13 +4,17 @@ import { Categories } from './collections/index.js'
 import { createOrders } from './collections/Orders.js'
 import { Carts } from './collections/Carts.js'
 import { Coupons } from './collections/Coupons.js'
+import type { IsAdmin } from './lib/access.js'
+import { createEcommerceAccess, defaultIsAdmin } from './lib/access.js'
 import { createDeleteExpiredCartsTask, DELETE_EXPIRED_CARTS_TASK_SLUG } from './lib/cartExpiry.js'
 
 export type CollectionExtender = (baseCollection: CollectionConfig) => CollectionConfig
 
 export { Products, Categories, Carts, Coupons }
 export { useEcommerce } from './lib/useEcommerce.js'
-export type { EcommerceHelpers } from './lib/useEcommerce.js'
+export type { EcommerceHelperOptions, EcommerceHelpers } from './lib/useEcommerce.js'
+export { createEcommerceAccess, defaultIsAdmin } from './lib/access.js'
+export type { EcommerceAccess, IsAdmin } from './lib/access.js'
 export { isSameCartLine } from './lib/cart.js'
 export { getRelationshipId, isSameDocument } from './lib/relationships.js'
 export type { DocumentId } from './lib/relationships.js'
@@ -46,7 +50,21 @@ export type PayloadEcommerceConfig = {
    */
   cartCleanupTask?: boolean
 
+  /**
+   * Slug of the auth collection whose users are the shop's customers. Default: `'users'`.
+   * The default access rules let a signed-in user of this collection read their own orders
+   * and read and update their own carts.
+   */
   userCollection?: string
+
+  /**
+   * Decides who may manage the shop: write products, categories and coupons and read and
+   * change every order and cart through REST, GraphQL and the admin panel. Default: a
+   * signed-in user whose `role` is `'admin'` or whose `roles` array contains `'admin'`.
+   * When your users collection has neither field nobody is an admin until you pass this
+   * option, for example `isAdmin: ({ req }) => req.user?.collection === 'admins'`.
+   */
+  isAdmin?: IsAdmin
 
   payments?: {
     providers: ('stripe' | 'paypal' | 'square')[]
@@ -127,16 +145,30 @@ export const payloadEcommerce =
       collections: customCollections = {},
       userCollection = 'users',
       disabled = false,
+      isAdmin = defaultIsAdmin,
     } = pluginOptions
 
     const Orders = createOrders(pluginOptions)
+    const access = createEcommerceAccess(isAdmin, userCollection)
+
+    // The base collections get the default access rules before a CollectionExtender sees
+    // them, so a host can replace or widen any rule from its extender.
+    const cartsWithAccess: CollectionConfig = {
+      ...Carts,
+      access: access.carts,
+      fields: Carts.fields.map((field) =>
+        'name' in field && (field.name === 'user' || field.name === 'sessionId')
+          ? ({ ...field, access: access.cartOwnerField } as typeof field)
+          : field,
+      ),
+    }
 
     config.collections.push(
-      processCollection(Products, customCollections.products, 'products'),
-      processCollection(Categories, customCollections.categories, 'categories'),
-      processCollection(Orders, customCollections.orders, 'orders'),
-      processCollection(Carts, customCollections.carts, 'carts'),
-      processCollection(Coupons, customCollections.coupons, 'coupons'),
+      processCollection({ ...Products, access: access.products }, customCollections.products, 'products'),
+      processCollection({ ...Categories, access: access.categories }, customCollections.categories, 'categories'),
+      processCollection({ ...Orders, access: access.orders }, customCollections.orders, 'orders'),
+      processCollection(cartsWithAccess, customCollections.carts, 'carts'),
+      processCollection({ ...Coupons, access: access.coupons }, customCollections.coupons, 'coupons'),
     )
 
     if (pluginOptions.cartCleanupTask) {

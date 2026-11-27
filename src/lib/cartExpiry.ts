@@ -50,6 +50,7 @@ export const deleteExpiredCarts = async (
   const result = await payload.delete({
     collection: cartsSlug,
     depth: 0,
+    overrideAccess: true,
     req,
     where: { expiresAt: { less_than_equal: now.toISOString() } },
   })

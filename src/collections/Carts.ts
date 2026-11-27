@@ -100,6 +100,9 @@ export const Carts: CollectionConfig = {
                   collection: 'products',
                   id: productId,
                   depth: 0,
+                  // The price is needed whoever saves the cart, also for a product the
+                  // user cannot read.
+                  overrideAccess: true,
                   req,
                 })
               } catch (error) {
