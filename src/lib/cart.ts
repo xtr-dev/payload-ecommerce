@@ -1,22 +1,26 @@
 import type { Payload } from 'payload'
 
+import type { DocumentId } from './relationships.js'
+
+import { isSameDocument } from './relationships.js'
+
 export interface AddToCartParams {
-  productId: string
+  productId: DocumentId
   quantity: number
   variant?: string
-  userId?: string
+  userId?: DocumentId
   sessionId?: string
 }
 
 export interface UpdateCartItemParams {
-  cartId: string
-  productId: string
+  cartId: DocumentId
+  productId: DocumentId
   quantity: number
 }
 
 export interface RemoveFromCartParams {
-  cartId: string
-  productId: string
+  cartId: DocumentId
+  productId: DocumentId
   variant?: string
 }
 
@@ -46,7 +50,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
       const items = cart.items || []
       const existingItemIndex = items.findIndex(
         (item: any) =>
-          item.product === productId && (variant ? item.variant === variant : !item.variant),
+          isSameDocument(item.product, productId) && (variant ? item.variant === variant : !item.variant),
       )
 
       if (existingItemIndex >= 0) {
@@ -85,7 +89,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     }
 
     const items = cart.items || []
-    const itemIndex = items.findIndex((item: any) => item.product === productId)
+    const itemIndex = items.findIndex((item: any) => isSameDocument(item.product, productId))
 
     if (itemIndex === -1) {
       throw new Error('Item not found in cart')
@@ -116,7 +120,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
 
     const items = (cart.items || []).filter(
       (item: any) =>
-        !(item.product === productId && (variant ? item.variant === variant : !item.variant)),
+        !(isSameDocument(item.product, productId) && (variant ? item.variant === variant : !item.variant)),
     )
 
     return await payload.update({
@@ -126,7 +130,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     })
   }
 
-  const getCart = async (userId?: string, sessionId?: string) => {
+  const getCart = async (userId?: DocumentId, sessionId?: string) => {
     if (!userId && !sessionId) {
       throw new Error('Either userId or sessionId is required')
     }
@@ -142,7 +146,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     return docs[0] || null
   }
 
-  const clearCart = async (cartId: string) => {
+  const clearCart = async (cartId: DocumentId) => {
     return await payload.update({
       collection: cartsSlug,
       id: cartId,

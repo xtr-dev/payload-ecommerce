@@ -1,7 +1,11 @@
 import type { Payload } from 'payload'
 
+import type { DocumentId } from './relationships.js'
+
+import { getRelationshipId } from './relationships.js'
+
 export interface CreateOrderFromCartParams {
-  cartId: string
+  cartId: DocumentId
   orderData?: {
     shippingAddress: {
       firstName: string
@@ -32,7 +36,7 @@ export interface CreateOrderFromCartParams {
     shipping?: number
     discount?: number
     total?: number
-    coupon?: string
+    coupon?: DocumentId
     status?: string
     paymentStatus?: string
   }
@@ -64,7 +68,7 @@ export interface CreateOrderFromCartParams {
 }
 
 export interface UpdateOrderStatusParams {
-  orderId: string
+  orderId: DocumentId
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded'
   trackingNumber?: string
   trackingUrl?: string
@@ -103,23 +107,32 @@ export const createOrderHelpers = (
     let calculatedSubtotal = 0
 
     for (const item of cart.items) {
+      const productId = getRelationshipId(item.product)
+
+      if (productId === undefined) {
+        throw new Error('Cart contains an item without a product')
+      }
+
+      // The cart is read with depth 2, so the product is normally already populated. It is
+      // still a bare id when the caller's access control or a custom products collection
+      // prevents population, and then it has to be loaded to know its price.
       const product =
-        typeof item.product === 'string'
-          ? await payload.findByID({
+        typeof item.product === 'object'
+          ? item.product
+          : await payload.findByID({
               collection: productsSlug,
-              id: item.product,
+              id: productId,
             })
-          : item.product
 
       if (!product) {
-        throw new Error(`Product not found: ${item.product}`)
+        throw new Error(`Product not found: ${productId}`)
       }
 
       const price = product.price || 0
       const total = price * item.quantity
 
       items.push({
-        product: typeof item.product === 'string' ? item.product : item.product.id,
+        product: productId,
         variant: item.variant,
         quantity: item.quantity,
         price,
@@ -190,7 +203,7 @@ export const createOrderHelpers = (
     })
   }
 
-  const getOrder = async (orderId: string) => {
+  const getOrder = async (orderId: DocumentId) => {
     return await payload.findByID({
       collection: ordersSlug,
       id: orderId,
@@ -198,7 +211,7 @@ export const createOrderHelpers = (
     })
   }
 
-  const getUserOrders = async (userId: string) => {
+  const getUserOrders = async (userId: DocumentId) => {
     return await payload.find({
       collection: ordersSlug,
       where: {

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
+import { getRelationshipId } from 'payload-ecommerce';
 import { PriceDisplay } from '../../../../components/storefront/PriceDisplay';
 import { InventoryBadge } from '../../../../components/storefront/InventoryBadge';
 import { AddToCartForm } from '../../../../components/storefront/AddToCartForm';
@@ -43,9 +44,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
   // Fetch related products from same categories
   let relatedProducts: any[] = [];
   if (product.categories && product.categories.length > 0) {
-    const categoryId = typeof product.categories[0] === 'string'
-      ? product.categories[0]
-      : product.categories[0].id;
+    const categoryId = getRelationshipId(product.categories[0]);
 
     const { docs: related } = await payload.find({
       collection: 'products',

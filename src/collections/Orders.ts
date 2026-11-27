@@ -2,6 +2,7 @@ import type { CollectionConfig } from 'payload'
 import type { PayloadEcommerceConfig } from '../index.js'
 import { createProductHelpers } from '../lib/products.js'
 import { createCouponHelpers } from '../lib/coupons.js'
+import { getRelationshipId } from '../lib/relationships.js'
 
 const addressFields = [
   {
@@ -308,7 +309,10 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
             const productHelpers = createProductHelpers(req.payload, productsSlug)
 
             for (const item of doc.items || []) {
-              const productId = typeof item.product === 'string' ? item.product : item.product.id
+              const productId = getRelationshipId(item.product)
+              if (productId === undefined) {
+                continue
+              }
               try {
                 await productHelpers.reduceInventory(productId, item.quantity, item.variant)
               } catch (error) {
@@ -318,9 +322,11 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
 
             if (doc.coupon) {
               const couponHelpers = createCouponHelpers(req.payload, couponsSlug)
-              const couponId = typeof doc.coupon === 'string' ? doc.coupon : doc.coupon.id
+              const couponId = getRelationshipId(doc.coupon)
               try {
-                await couponHelpers.incrementCouponUsage(couponId)
+                if (couponId !== undefined) {
+                  await couponHelpers.incrementCouponUsage(couponId)
+                }
               } catch (error) {
                 req.payload.logger.error(`Failed to increment coupon usage: ${error}`)
               }

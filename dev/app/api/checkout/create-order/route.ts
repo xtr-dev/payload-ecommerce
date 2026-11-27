@@ -1,6 +1,7 @@
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
-import { useEcommerce } from 'payload-ecommerce';
+import { getRelationshipId, useEcommerce } from 'payload-ecommerce';
+import type { DocumentId } from 'payload-ecommerce';
 import {NextResponse} from "next/server"
 
 export async function POST(request: Request) {
@@ -51,13 +52,13 @@ export async function POST(request: Request) {
     // Calculate totals
     const subtotal = cart.subtotal || 0;
     let discount = 0;
-    let discountCouponId: string | undefined;
+    let discountCouponId: DocumentId | undefined;
 
     // Validate and apply coupon if provided
     if (couponCode) {
-      const productIds = cart.items.map((item: any) =>
-        typeof item.product === 'string' ? item.product : item.product.id
-      );
+      const productIds: DocumentId[] = cart.items
+        .map((item: any) => getRelationshipId(item.product))
+        .filter((id: DocumentId | undefined) => id !== undefined);
 
       const couponResult = await ecommerce.coupons.validateCoupon({
         code: couponCode,
