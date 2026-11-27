@@ -20,7 +20,8 @@ pnpm dev              # Start dev server (Next.js app in dev/)
 pnpm build            # Build for production
 pnpm typecheck        # tsc --noEmit over src/
 pnpm lint             # Run ESLint
-pnpm test             # Integration tests (vitest run)
+pnpm test             # Integration tests (vitest run) on SQLite
+pnpm test:mongo       # Same tests on an in-memory MongoDB replica set
 pnpm test:pack        # Build, pack and import every published export
 pnpm test:e2e         # Playwright tests against the demo (not in CI)
 pnpm dev:generate-types    # Regenerate Payload types
@@ -121,4 +122,4 @@ billingPlugin({
 
 ## Tests
 
-Integration tests are in `dev/int.spec.ts` and run against a temporary SQLite database (numeric ids, no transactions). Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.
+Integration tests are in `dev/int.spec.ts`. `pnpm test` runs them against a temporary SQLite database (numeric ids, no transactions) and `pnpm test:mongo` against an in-memory MongoDB replica set (string ids, transactions); CI runs both, so a test must not assume an id type. For operations started at the same time, use the `settleConcurrently` helper in that file: it retries MongoDB's transient write conflicts. Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.

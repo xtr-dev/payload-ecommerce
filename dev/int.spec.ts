@@ -21,6 +21,60 @@ import {
 
 let payload: Payload
 
+/** True when the suite runs against MongoDB (`pnpm test:mongo`) instead of the default SQLite. */
+const usesMongoDB = process.env.DATABASE_ADAPTER === 'mongodb'
+
+/**
+ * Tells whether an operation failed with MongoDB's transient "write conflict": two
+ * transactions wrote the same document and MongoDB aborted one of them. It says nothing
+ * about the outcome the operation would have had, and the documented answer is to retry.
+ * It never occurs on SQLite.
+ */
+const isTransientWriteConflict = (error: unknown): boolean => {
+  const { code, errorLabels, message } = (error ?? {}) as {
+    code?: number
+    errorLabels?: string[]
+    message?: string
+  }
+
+  return (
+    code === 112 ||
+    Boolean(errorLabels?.includes('TransientTransactionError')) ||
+    /write conflict/i.test(message ?? '')
+  )
+}
+
+/**
+ * Starts all operations at once and returns how each one ended, in the same order. An
+ * operation that MongoDB aborted with a transient write conflict is run again, together
+ * with the others that were aborted, until each has either succeeded or failed for a real
+ * reason, the way a storefront would retry. On SQLite this is a single round.
+ */
+const settleConcurrently = async <T>(
+  operations: Array<() => Promise<T>>,
+): Promise<Array<PromiseSettledResult<T>>> => {
+  const results: Array<PromiseSettledResult<T>> = new Array(operations.length)
+  let pending = operations.map((_, index) => index)
+
+  for (let round = 0; pending.length > 0; round += 1) {
+    if (round === 20) {
+      throw new Error('Operations kept failing with a transient write conflict after 20 rounds')
+    }
+
+    const settled = await Promise.allSettled(pending.map((index) => operations[index]()))
+    const retry: number[] = []
+    for (const [position, result] of settled.entries()) {
+      results[pending[position]] = result
+      if (result.status === 'rejected' && isTransientWriteConflict(result.reason)) {
+        retry.push(pending[position])
+      }
+    }
+    pending = retry
+  }
+
+  return results
+}
+
 afterAll(async () => {
   // Payload 3.37 has no payload.destroy(); closing the database adapter is what releases
   // the SQLite file handle so the vitest worker can exit.
@@ -643,8 +697,9 @@ describe('Ecommerce Plugin integration tests', () => {
   })
 
   // Stock and coupon usage are changed with one conditional database statement per order
-  // line (see src/lib/atomic.ts). The test database is SQLite without transactions, so a
-  // failed order is cleaned up by the plugin itself rather than by a rollback.
+  // line (see src/lib/atomic.ts). On SQLite the test database has no transactions, so a
+  // failed order is cleaned up by the plugin itself; on MongoDB (`pnpm test:mongo`) every
+  // operation runs in a transaction and a failed order is rolled back.
   describe('order side effects', () => {
     const address = {
       address1: '1 Main Street',
@@ -784,9 +839,9 @@ describe('Ecommerce Plugin integration tests', () => {
     test('two concurrent orders for the last unit: exactly one succeeds', async () => {
       const product = await createProduct('Stock Last Unit Product', tracked(1))
 
-      const results = await Promise.allSettled([
-        createOrder([{ product, quantity: 1 }]),
-        createOrder([{ product, quantity: 1 }]),
+      const results = await settleConcurrently([
+        () => createOrder([{ product, quantity: 1 }]),
+        () => createOrder([{ product, quantity: 1 }]),
       ])
 
       expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected'])
@@ -802,8 +857,8 @@ describe('Ecommerce Plugin integration tests', () => {
     test('many concurrent orders never take more than the stock', async () => {
       const product = await createProduct('Stock Rush Product', tracked(3))
 
-      const results = await Promise.allSettled(
-        Array.from({ length: 8 }, () => createOrder([{ product, quantity: 1 }])),
+      const results = await settleConcurrently(
+        Array.from({ length: 8 }, () => () => createOrder([{ product, quantity: 1 }])),
       )
 
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(3)
@@ -815,15 +870,17 @@ describe('Ecommerce Plugin integration tests', () => {
       const plenty = await createProduct('Stock Race Plenty Product', tracked(10))
       const last = await createProduct('Stock Race Last Product', tracked(1))
 
-      const results = await Promise.allSettled([
-        createOrder([
-          { product: plenty, quantity: 2 },
-          { product: last, quantity: 1 },
-        ]),
-        createOrder([
-          { product: plenty, quantity: 2 },
-          { product: last, quantity: 1 },
-        ]),
+      const results = await settleConcurrently([
+        () =>
+          createOrder([
+            { product: plenty, quantity: 2 },
+            { product: last, quantity: 1 },
+          ]),
+        () =>
+          createOrder([
+            { product: plenty, quantity: 2 },
+            { product: last, quantity: 1 },
+          ]),
       ])
 
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
@@ -838,10 +895,10 @@ describe('Ecommerce Plugin integration tests', () => {
         data: { code: 'RACEONCE', status: 'active', type: 'fixed', usageLimit: 1, value: 1 },
       })
 
-      const results = await Promise.allSettled([
-        createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
-        createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
-        createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
+      const results = await settleConcurrently([
+        () => createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
+        () => createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
+        () => createOrder([{ product, quantity: 1 }], { coupon: coupon.id }),
       ])
 
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
@@ -1092,8 +1149,8 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(await variantStockOf(product, 'Blue')).toBe(3)
       expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(2)
 
-      const results = await Promise.allSettled(
-        statuses.map((status, index) =>
+      const results = await settleConcurrently(
+        statuses.map((status, index) => () =>
           payload.update({
             id: order.id,
             collection: 'orders',
@@ -1479,9 +1536,6 @@ describe('Ecommerce Plugin integration tests', () => {
     )
   })
 
-  // The tests below run on SQLite, where document ids are numbers. The plugin used to
-  // recognise only string ids (MongoDB) as "not populated", so numeric ids were read as
-  // populated documents without an `id` and the related product or coupon was lost.
   describe('variant prices', () => {
     const address = {
       address1: '1 Main Street',
@@ -1700,7 +1754,11 @@ describe('Ecommerce Plugin integration tests', () => {
     })
   })
 
-  describe('order flow with numeric ids', () => {
+  // By default these run on SQLite, where document ids are numbers. The plugin used to
+  // recognise only string ids (MongoDB) as "not populated", so numeric ids were read as
+  // populated documents without an `id` and the related product or coupon was lost.
+  // `pnpm test:mongo` runs the same flow with string ids.
+  describe('order flow with the id type of the database', () => {
     const address = {
       address1: '1 Main Street',
       city: 'Amsterdam',
@@ -1728,9 +1786,11 @@ describe('Ecommerce Plugin integration tests', () => {
         data: { code, type: 'percentage', status: 'active', value: 10, ...extra },
       })
 
-    test('document ids are numbers in this test database', async () => {
+    // Guards the assumption the rest of this block rests on: if a run used another id
+    // type than expected, the tests below would pass without covering it.
+    test(`document ids are ${usesMongoDB ? 'strings' : 'numbers'} in this test database`, async () => {
       const product = await createTrackedProduct('Id Type Product', 1)
-      expect(typeof product.id).toBe('number')
+      expect(typeof product.id).toBe(usesMongoDB ? 'string' : 'number')
     })
 
     // depth 0 keeps relationships as bare ids in the document the afterChange hook sees;

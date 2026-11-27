@@ -35,4 +35,5 @@ jobs:
         pnpm typecheck
         pnpm lint
         pnpm test
+        pnpm test:mongo
         pnpm test:pack

@@ -1,3 +1,4 @@
+import { mongooseAdapter } from '@payloadcms/db-mongodb'
 import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
@@ -16,6 +17,29 @@ const dirname = path.dirname(filename)
 if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
+
+// SQLite is the default. DATABASE_ADAPTER=mongodb switches to MongoDB, which is how
+// `pnpm test:mongo` runs the integration tests against the plugin's MongoDB-specific code
+// (see vitest.config.js); DATABASE_URI must then be a MongoDB connection string.
+const useMongoDB = process.env.DATABASE_ADAPTER === 'mongodb'
+
+if (useMongoDB && !process.env.DATABASE_URI) {
+  throw new Error('DATABASE_ADAPTER=mongodb needs DATABASE_URI set to a MongoDB connection string')
+}
+
+const databaseAdapter = useMongoDB
+  ? mongooseAdapter({
+      // Creates every collection and its indexes while connecting. Without this MongoDB
+      // creates them in the background on first use, and a transaction that touches a
+      // collection still being created fails with "Collection namespace is already in use".
+      ensureIndexes: true,
+      url: process.env.DATABASE_URI || '',
+    })
+  : sqliteAdapter({
+      client: {
+        url: process.env.DATABASE_URI || `file:${path.resolve(dirname, 'payload.db')}`,
+      },
+    })
 
 export default buildConfig({
   admin: {
@@ -39,11 +63,7 @@ export default buildConfig({
       },
     },
   ],
-  db: sqliteAdapter({
-    client: {
-      url: process.env.DATABASE_URI || `file:${path.resolve(dirname, 'payload.db')}`,
-    },
-  }),
+  db: databaseAdapter,
   editor: lexicalEditor(),
   email: testEmailAdapter,
   onInit: async (payload) => {

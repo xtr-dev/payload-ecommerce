@@ -21,6 +21,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # MongoDB server version that mongodb-memory-server downloads for "Test (MongoDB)".
+  # Pinned so the cached binary below stays valid until this line changes.
+  MONGOMS_VERSION: 7.0.14
+
 jobs:
   check:
     name: ${{ matrix.task.name }}
@@ -35,6 +40,11 @@ jobs:
             run: pnpm lint
           - name: Test
             run: pnpm test
+          # The same integration tests against an in-memory MongoDB replica set, for the
+          # plugin's MongoDB-specific statements and its behaviour inside transactions.
+          - name: Test (MongoDB)
+            run: pnpm test:mongo
+            mongodb: true
           - name: Build and verify packed exports
             run: pnpm test:pack
     steps:
@@ -53,5 +63,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Saves downloading the MongoDB server binary (about 100 MB) on every run.
+      - name: Cache MongoDB binary
+        if: matrix.task.mongodb
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ env.MONGOMS_VERSION }}
+
       - name: ${{ matrix.task.name }}
         run: ${{ matrix.task.run }}
+        env:
+          # Where mongodb-memory-server keeps its download; only "Test (MongoDB)" uses it.
+          MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
