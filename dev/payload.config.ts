@@ -49,6 +49,27 @@ export default buildConfig({
   },
   collections: [
     {
+      slug: 'users',
+      admin: { useAsTitle: 'email' },
+      auth: true,
+      fields: [
+        // The plugin's default access rules treat users with role 'admin' as shop admins;
+        // everyone else is a customer who only reaches their own orders and carts.
+        {
+          name: 'role',
+          type: 'select',
+          access: {
+            // Without this a customer could make themselves an admin through the REST API.
+            create: ({ req }) => req.user?.role === 'admin',
+            update: ({ req }) => req.user?.role === 'admin',
+          },
+          defaultValue: 'customer',
+          options: ['admin', 'customer'],
+          required: true,
+        },
+      ],
+    },
+    {
       slug: 'posts',
       fields: [],
     },

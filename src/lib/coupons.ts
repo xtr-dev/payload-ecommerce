@@ -1,7 +1,9 @@
 import type { Payload, PayloadRequest } from 'payload'
 
+import type { HelperAccessOptions } from './access.js'
 import type { DocumentId } from './relationships.js'
 
+import { resolveLocalApiAccess } from './access.js'
 import { adjustCouponUsage } from './atomic.js'
 import { isSameDocument } from './relationships.js'
 
@@ -104,6 +106,8 @@ export const evaluateCoupon = async (
   if (userId !== undefined && userId !== null && coupon.customerLimit) {
     const { totalDocs } = await payload.count({
       collection: ordersSlug,
+      // Counts all of the customer's orders, whoever is asking.
+      overrideAccess: true,
       req,
       where: {
         and: [
@@ -170,10 +174,16 @@ export const createCouponHelpers = (
   payload: Payload,
   couponsSlug = 'coupons',
   ordersSlug = 'orders',
+  accessOptions: HelperAccessOptions = {},
 ) => {
+  // Coupons are readable by admins only, and these helpers are how everyone else gets a
+  // code checked, so they always bypass access control.
+  const { trusted } = resolveLocalApiAccess(accessOptions)
+
   /** Finds a coupon by its code. Codes are stored in upper case and matched ignoring case. */
   const findCouponByCode = async (code: string) => {
     const { docs } = await payload.find({
+      ...trusted,
       collection: couponsSlug,
       depth: 0,
       limit: 1,
@@ -197,7 +207,7 @@ export const createCouponHelpers = (
   }: ValidateCouponParams): Promise<ApplyCouponResult> => {
     const coupon = await findCouponByCode(code)
 
-    return await evaluateCoupon(payload, coupon, { ...params, ordersSlug })
+    return await evaluateCoupon(payload, coupon, { ...params, ordersSlug, req: trusted.req })
   }
 
   const applyCoupon = async (
@@ -221,14 +231,20 @@ export const createCouponHelpers = (
       couponId,
       couponsSlug,
       delta: 1,
-      req: options.req,
+      req: options.req ?? trusted.req,
     })
 
     if (!counted) {
       throw new Error('Coupon not found or its usage limit is reached')
     }
 
-    return await payload.findByID({ id: couponId, collection: couponsSlug, depth: 0, req: options.req })
+    return await payload.findByID({
+      ...trusted,
+      id: couponId,
+      collection: couponsSlug,
+      depth: 0,
+      req: options.req ?? trusted.req,
+    })
   }
 
   /**
@@ -236,9 +252,15 @@ export const createCouponHelpers = (
    * collection calls this when an order with a coupon is cancelled or refunded.
    */
   const decrementCouponUsage = async (couponId: DocumentId, options: { req?: PayloadRequest } = {}) => {
-    await adjustCouponUsage(payload, { couponId, couponsSlug, delta: -1, req: options.req })
+    await adjustCouponUsage(payload, { couponId, couponsSlug, delta: -1, req: options.req ?? trusted.req })
 
-    return await payload.findByID({ id: couponId, collection: couponsSlug, depth: 0, req: options.req })
+    return await payload.findByID({
+      ...trusted,
+      id: couponId,
+      collection: couponsSlug,
+      depth: 0,
+      req: options.req ?? trusted.req,
+    })
   }
 
   return {

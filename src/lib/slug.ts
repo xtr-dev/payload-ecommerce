@@ -38,6 +38,8 @@ export const createSlugHook =
     const isTaken = async (slug: string): Promise<boolean> => {
       const { totalDocs } = await req.payload.count({
         collection: collection.slug,
+        // The slug must be unique among all documents, not only those the user may read.
+        overrideAccess: true,
         req,
         where: {
           and: [

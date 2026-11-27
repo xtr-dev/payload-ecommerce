@@ -1,7 +1,9 @@
 import type { Payload } from 'payload'
 
+import type { HelperAccessOptions } from './access.js'
 import type { DocumentId } from './relationships.js'
 
+import { resolveLocalApiAccess } from './access.js'
 import { isCartExpired } from './cartExpiry.js'
 import { createCouponHelpers } from './coupons.js'
 import { resolveUnitPrice } from './pricing.js'
@@ -86,7 +88,19 @@ export const createOrderHelpers = (
   cartsSlug = 'carts',
   productsSlug = 'products',
   couponsSlug = 'coupons',
+  accessOptions: HelperAccessOptions = {},
 ) => {
+  const { caller, trusted } = resolveLocalApiAccess(accessOptions)
+
+  /**
+   * Creates an order from a cart and empties the cart.
+   *
+   * The cart is read on behalf of the caller, so with `overrideAccess: false` a user can
+   * only check out their own cart. Everything after that is the plugin's own work and
+   * bypasses access control: pricing the lines from the products, looking up the coupon,
+   * creating the order (the default access rules let nobody but an admin create one
+   * through the API) and emptying the cart.
+   */
   const createOrderFromCart = async (params: CreateOrderFromCartParams) => {
     const { cartId, orderData } = params
 
@@ -101,6 +115,7 @@ export const createOrderHelpers = (
     }
 
     const cart = await payload.findByID({
+      ...caller,
       collection: cartsSlug,
       id: cartId,
       depth: 2,
@@ -134,6 +149,7 @@ export const createOrderHelpers = (
         typeof item.product === 'object'
           ? item.product
           : await payload.findByID({
+              ...trusted,
               collection: productsSlug,
               id: productId,
             })
@@ -168,7 +184,7 @@ export const createOrderHelpers = (
     // when the order is created; here a code only has to be turned into the coupon's id.
     let couponId = orderData?.coupon
     if (couponId === undefined && orderData?.couponCode) {
-      const coupon = await createCouponHelpers(payload, couponsSlug, ordersSlug).findCouponByCode(
+      const coupon = await createCouponHelpers(payload, couponsSlug, ordersSlug, accessOptions).findCouponByCode(
         orderData.couponCode,
       )
       if (!coupon) {
@@ -179,6 +195,7 @@ export const createOrderHelpers = (
     const paymentStatus = orderData?.paymentStatus || 'pending'
 
     const order = await payload.create({
+      ...trusted,
       collection: ordersSlug,
       data: {
         user: cart.user || undefined,
@@ -198,6 +215,7 @@ export const createOrderHelpers = (
     })
 
     await payload.update({
+      ...trusted,
       collection: cartsSlug,
       id: cartId,
       data: { items: [] },
@@ -223,6 +241,7 @@ export const createOrderHelpers = (
     }
 
     return await payload.update({
+      ...caller,
       collection: ordersSlug,
       id: orderId,
       data: updateData,
@@ -231,6 +250,7 @@ export const createOrderHelpers = (
 
   const getOrder = async (orderId: DocumentId) => {
     return await payload.findByID({
+      ...caller,
       collection: ordersSlug,
       id: orderId,
       depth: 2,
@@ -239,6 +259,7 @@ export const createOrderHelpers = (
 
   const getUserOrders = async (userId: DocumentId) => {
     return await payload.find({
+      ...caller,
       collection: ordersSlug,
       where: {
         user: {

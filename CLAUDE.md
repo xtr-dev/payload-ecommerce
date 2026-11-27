@@ -55,6 +55,8 @@ payloadEcommerce({
     carts: 'carts' | CollectionExtender,
     coupons: 'coupons' | CollectionExtender,
   },
+  // Who manages the shop; default: user.role === 'admin' or user.roles includes 'admin'
+  isAdmin: ({ req }) => boolean,
   // Registers the 'ecommerce-delete-expired-carts' jobs task (not scheduled)
   cartCleanupTask: boolean,
   hooks: {
@@ -65,9 +67,13 @@ payloadEcommerce({
 })
 ```
 
-The option type also lists `userCollection`, `payments`, `emails`, `shipping`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are not implemented: accepted but ignored.
+The option type also lists `payments`, `emails`, `shipping`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are not implemented: accepted but ignored. `userCollection` is only used by the access rules.
+
+### Access control
+`src/lib/access.ts` builds the default `access` of every collection (products/categories: public read, admin write; coupons: admin only; orders: owner read, admin write; carts: owner read/create/update, admin all; guest carts and orders: admin only). The plugin applies it before a CollectionExtender runs. Hooks and internal bookkeeping call the Local API with an explicit `overrideAccess: true`; the `useEcommerce` helpers do too unless the caller passes `{ overrideAccess: false, user | req }`. The dev app's `users` collection has a `role` field for this.
 
 ### Where the logic lives
+- `src/lib/access.ts` - default access rules, `defaultIsAdmin`, and how helpers pass `overrideAccess`/`req`/`user`
 - `src/lib/totals.ts` - the only place an order total is computed
 - `src/lib/coupons.ts` - coupon rules (`evaluateCoupon`), shared by `validateCoupon` and the Orders hook
 - `src/lib/atomic.ts` - conditional single-statement stock and coupon-usage updates (SQL via the adapter's `execute`, MongoDB via `$inc`), with a non-atomic fallback

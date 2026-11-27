@@ -278,6 +278,7 @@ export const adjustStock = async (
     collection: productsSlug,
     depth: 0,
     disableErrors: true,
+    overrideAccess: true,
     req,
   })
   if (!product) {
@@ -291,7 +292,7 @@ export const adjustStock = async (
       return false
     }
     variants[index] = { ...variants[index], inventory: (variants[index].inventory || 0) + delta }
-    await payload.update({ id: productId, collection: productsSlug, data: { variants }, req })
+    await payload.update({ id: productId, collection: productsSlug, data: { variants }, overrideAccess: true, req })
     return true
   }
 
@@ -303,6 +304,7 @@ export const adjustStock = async (
     id: productId,
     collection: productsSlug,
     data: { inventory: { ...product.inventory, quantity: quantity + delta } },
+    overrideAccess: true,
     req,
   })
   return true
@@ -387,6 +389,7 @@ export const adjustCouponUsage = async (
     collection: couponsSlug,
     depth: 0,
     disableErrors: true,
+    overrideAccess: true,
     req,
   })
   if (!coupon) {
@@ -401,6 +404,7 @@ export const adjustCouponUsage = async (
     id: couponId,
     collection: couponsSlug,
     data: { usageCount: usageCount + delta },
+    overrideAccess: true,
     req,
   })
   return true
@@ -461,6 +465,7 @@ export const claimOrderRelease = async (
     collection: ordersSlug,
     depth: 0,
     disableErrors: true,
+    overrideAccess: true,
     req,
   })
   if (!order?.[flag]) {

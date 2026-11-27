@@ -1,8 +1,10 @@
 import type { Payload, Where } from 'payload'
 
+import type { HelperAccessOptions } from './access.js'
 import type { DeleteExpiredCartsOptions } from './cartExpiry.js'
 import type { DocumentId } from './relationships.js'
 
+import { resolveLocalApiAccess } from './access.js'
 import { deleteExpiredCarts, isCartExpired } from './cartExpiry.js'
 
 import { isSameDocument } from './relationships.js'
@@ -49,7 +51,15 @@ export const isSameCartLine = (
   variant?: null | string,
 ): boolean => isSameDocument(item?.product, productId) && (item?.variant || null) === (variant || null)
 
-export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
+export const createCartHelpers = (
+  payload: Payload,
+  cartsSlug = 'carts',
+  accessOptions: HelperAccessOptions = {},
+) => {
+  // Every cart read and write is made on behalf of the caller, so with
+  // `overrideAccess: false` a user only reaches their own cart.
+  const { caller } = resolveLocalApiAccess(accessOptions)
+
   /**
    * Finds the cart of a user or guest session that has not expired, the most recently
    * changed one first. An expired cart is treated as absent; it stays in the database
@@ -63,6 +73,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     const owner: Where = userId ? { user: { equals: userId } } : { sessionId: { equals: sessionId } }
 
     const { docs } = await payload.find({
+      ...caller,
       collection: cartsSlug,
       limit: 1,
       sort: '-updatedAt',
@@ -88,6 +99,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
    */
   const loadActiveCart = async (cartId: DocumentId) => {
     const cart = await payload.findByID({
+      ...caller,
       id: cartId,
       collection: cartsSlug,
       disableErrors: true,
@@ -125,12 +137,14 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
       }
 
       cart = await payload.update({
+        ...caller,
         collection: cartsSlug,
         id: cart.id,
         data: { items },
       })
     } else {
       cart = await payload.create({
+        ...caller,
         collection: cartsSlug,
         data: {
           user: userId,
@@ -165,6 +179,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     }
 
     return await payload.update({
+      ...caller,
       collection: cartsSlug,
       id: cartId,
       data: { items },
@@ -181,6 +196,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     const items = (cart.items || []).filter((item: any) => !isSameCartLine(item, productId, variant))
 
     return await payload.update({
+      ...caller,
       collection: cartsSlug,
       id: cartId,
       data: { items },
@@ -196,6 +212,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
     await loadActiveCart(cartId)
 
     return await payload.update({
+      ...caller,
       collection: cartsSlug,
       id: cartId,
       data: { items: [] },
@@ -204,7 +221,7 @@ export const createCartHelpers = (payload: Payload, cartsSlug = 'carts') => {
 
   /** Deletes every expired cart in this collection and returns how many were deleted. */
   const deleteExpired = async (options: Omit<DeleteExpiredCartsOptions, 'cartsSlug'> = {}) => {
-    return await deleteExpiredCarts(payload, { ...options, cartsSlug })
+    return await deleteExpiredCarts(payload, { req: accessOptions.req, ...options, cartsSlug })
   }
 
   return {
