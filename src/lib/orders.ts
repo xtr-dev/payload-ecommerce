@@ -4,6 +4,7 @@ import type { DocumentId } from './relationships.js'
 
 import { isCartExpired } from './cartExpiry.js'
 import { createCouponHelpers } from './coupons.js'
+import { resolveUnitPrice } from './pricing.js'
 import { getRelationshipId } from './relationships.js'
 
 export interface CreateOrderFromCartParams {
@@ -128,7 +129,7 @@ export const createOrderHelpers = (
 
       // The cart is read with depth 2, so the product is normally already populated. It is
       // still a bare id when the caller's access control or a custom products collection
-      // prevents population, and then it has to be loaded to know its price.
+      // prevents population, and then it has to be loaded to know its price and variants.
       const product =
         typeof item.product === 'object'
           ? item.product
@@ -141,7 +142,8 @@ export const createOrderHelpers = (
         throw new Error(`Product not found: ${productId}`)
       }
 
-      const price = product.price || 0
+      // The same function prices the cart's subtotal, so a variant's own price is used here too.
+      const price = resolveUnitPrice(product, item.variant)
       const total = price * item.quantity
 
       items.push({

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
+import { resolveUnitPrice } from 'payload-ecommerce';
 
 export async function GET(request: Request) {
   try {
@@ -34,8 +35,8 @@ export async function GET(request: Request) {
     let subtotal = 0;
     if (cart.items && Array.isArray(cart.items)) {
       for (const item of cart.items) {
-        if (item.product && typeof item.product === 'object' && item.product.price) {
-          subtotal += item.product.price * (item.quantity || 1);
+        if (item.product && typeof item.product === 'object') {
+          subtotal += resolveUnitPrice(item.product, item.variant) * (item.quantity || 1);
         }
       }
     }

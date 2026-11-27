@@ -7,6 +7,8 @@ import { Input } from '../../../components/ui/Input';
 import { Card } from '../../../components/ui/Card';
 import { LoadingSpinner } from '../../../components/storefront/LoadingSpinner';
 import { formatPrice } from '../../../lib/formatters';
+// Imported from the file itself, not the package entry, so this client page does not bundle server code.
+import { resolveUnitPrice } from '../../../../src/lib/pricing';
 
 interface FormData {
   shippingFirstName: string;
@@ -404,7 +406,7 @@ export default function CheckoutPage() {
                       </p>
                       <p className="text-sm text-gray-600">Qty: {item.quantity}</p>
                       <p className="text-sm font-semibold text-gray-900">
-                        {formatPrice(item.product.price * item.quantity)}
+                        {formatPrice(resolveUnitPrice(item.product, item.variant) * item.quantity)}
                       </p>
                     </div>
                   </div>

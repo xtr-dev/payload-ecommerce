@@ -55,7 +55,8 @@ export function AddToCartForm({
         body: JSON.stringify({
           productId: typeof productId === 'string' ? parseInt(productId, 10) : productId,
           quantity,
-          variant: selectedVariant?.sku,
+          // The plugin identifies a variant by its name, for both its price and its stock.
+          variant: selectedVariant?.name,
         }),
       });
 
@@ -87,7 +88,7 @@ export function AddToCartForm({
           </label>
           <div className="grid grid-cols-2 gap-2">
             {variants.map((variant, index) => {
-              const variantPrice = variant.price || basePrice;
+              const variantPrice = variant.price ?? basePrice;
               const variantQty = variant.inventory ?? maxQuantity;
               const variantIsOutOfStock = trackQuantity && variantQty === 0;
               const isSelected = selectedVariantIndex === index;
@@ -107,7 +108,7 @@ export function AddToCartForm({
                   }`}
                 >
                   <div className="font-medium text-sm text-gray-900">{variant.name}</div>
-                  {variant.price && (
+                  {variant.price != null && (
                     <div className="text-sm text-gray-600 mt-1">
                       ${variantPrice.toFixed(2)}
                     </div>

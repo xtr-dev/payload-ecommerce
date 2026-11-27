@@ -1,6 +1,7 @@
 import type { CollectionConfig } from 'payload'
 
 import { cartExpiryFrom } from '../lib/cartExpiry.js'
+import { resolveUnitPrice } from '../lib/pricing.js'
 import { getRelationshipId } from '../lib/relationships.js'
 
 export const Carts: CollectionConfig = {
@@ -91,21 +92,23 @@ export const Carts: CollectionConfig = {
           for (const item of data.items) {
             const productId = getRelationshipId(item.product)
             // A bare id (string on MongoDB, number on SQLite/Postgres) means the relationship
-            // is not populated and the product has to be loaded for its price.
+            // is not populated and the product has to be loaded for its price and variants.
+            let product = typeof item.product === 'object' ? item.product : undefined
             if (productId !== undefined && typeof item.product !== 'object') {
               try {
-                const product = await req.payload.findByID({
+                product = await req.payload.findByID({
                   collection: 'products',
                   id: productId,
+                  depth: 0,
+                  req,
                 })
-                if (product?.price) {
-                  subtotal += product.price * item.quantity
-                }
               } catch (error) {
                 req.payload.logger.error(`Error fetching product: ${error}`)
               }
-            } else if (item.product?.price) {
-              subtotal += item.product.price * item.quantity
+            }
+            // A line whose product could not be loaded adds nothing to the subtotal.
+            if (product) {
+              subtotal += resolveUnitPrice(product, item.variant) * item.quantity
             }
           }
           data.subtotal = subtotal
