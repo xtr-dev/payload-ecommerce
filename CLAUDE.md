@@ -11,15 +11,18 @@ This file provides guidance to Claude Code when working in the @xtr-dev/payload-
 - **Framework**: PayloadCMS 3.37.0 plugin
 - **Build**: SWC for fast transpilation
 - **Package Manager**: pnpm
-- **Dependencies**: @xtr-dev/payload-billing (for payment integration)
+- **Dependencies**: none at runtime. @xtr-dev/payload-billing is a dev dependency used by the demo in `dev/` (payment integration)
 
 ## Development Commands
 
 ```bash
 pnpm dev              # Start dev server (Next.js app in dev/)
 pnpm build            # Build for production
+pnpm typecheck        # tsc --noEmit over src/
 pnpm lint             # Run ESLint
-pnpm test             # Run tests
+pnpm test             # Integration tests (vitest run)
+pnpm test:pack        # Build, pack and import every published export
+pnpm test:e2e         # Playwright tests against the demo (not in CI)
 pnpm dev:generate-types    # Regenerate Payload types
 ```
 

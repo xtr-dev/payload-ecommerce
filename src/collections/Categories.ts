@@ -36,7 +36,7 @@ export const Categories: CollectionConfig = {
   ],
   hooks: {
     beforeChange: [
-      async ({ data, operation }) => {
+      ({ data, operation }) => {
         if (operation === 'create' || operation === 'update') {
           if (data.name && !data.slug) {
             data.slug = data.name

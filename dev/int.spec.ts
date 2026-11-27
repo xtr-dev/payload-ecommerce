@@ -7,7 +7,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 let payload: Payload
 
 afterAll(async () => {
-  await payload.destroy()
+  // Payload 3.37 has no payload.destroy(); closing the database adapter is what releases
+  // the SQLite file handle so the vitest worker can exit.
+  if (typeof payload.db.destroy === 'function') {
+    await payload.db.destroy()
+  }
 })
 
 beforeAll(async () => {
@@ -94,5 +98,23 @@ describe('Ecommerce Plugin integration tests', () => {
     expect(coupon.type).toBe('percentage')
     expect(coupon.value).toBe(10)
     expect(coupon.status).toBe('active')
+  })
+
+  // The dev app's checkout creates a payment through @xtr-dev/payload-billing's test provider
+  // and redirects to /test-payment/<providerId>, so the billing plugin has to load in the dev
+  // config and assign a provider id on create.
+  test('billing test provider initialises a payment', async () => {
+    const payment = await payload.create({
+      collection: 'payments',
+      data: {
+        amount: 2999,
+        currency: 'USD',
+        provider: 'test',
+        status: 'pending',
+      },
+    })
+
+    expect(payment.providerId).toBeTruthy()
+    expect(payment.status).toBe('pending')
   })
 })

@@ -151,7 +151,7 @@ export const Coupons: CollectionConfig = {
   ],
   hooks: {
     beforeChange: [
-      async ({ data }) => {
+      ({ data }) => {
         if (data.validUntil) {
           const now = new Date()
           const validUntil = new Date(data.validUntil)

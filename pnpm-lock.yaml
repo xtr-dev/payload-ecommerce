@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      '@xtr-dev/payload-billing':
-        specifier: ^0.1.14
-        version: 0.1.14(@mollie/api-client@4.3.3)(payload@3.37.0(graphql@16.12.0)(typescript@5.7.3))(stripe@18.5.0(@types/node@22.19.0))
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.2.0
@@ -57,6 +53,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.6
         version: 19.1.6(@types/react@19.1.8)
+      '@xtr-dev/payload-billing':
+        specifier: ^0.6.0
+        version: 0.6.0(@mollie/api-client@4.3.3)(payload@3.37.0(graphql@16.12.0)(typescript@5.7.3))(stripe@18.5.0(@types/node@22.19.0))
       autoprefixer:
         specifier: ^10.4.20
         version: 10.4.21(postcss@8.5.6)
@@ -1387,6 +1386,7 @@ packages:
   '@mollie/api-client@4.3.3':
     resolution: {integrity: sha512-vA8EM3nO8pcTX2AAG93FQElZ9uVpKJ7DBCEalvyStZEnGYGD3fIVPs6Pmr0lIB2tkjrqjEdbhfwwaK4MtBxs+w==}
     engines: {node: '>=8'}
+    deprecated: 'This SDK is in maintenance mode. Migrate to mollie-api-typescript: https://github.com/mollie/mollie-api-typescript/blob/main/MIGRATION.md'
 
   '@monaco-editor/loader@1.6.1':
     resolution: {integrity: sha512-w3tEnj9HYEC73wtjdpR089AqkUPskFRcdkxsiSFt3SoUc3OHpmu+leP94CXBm4mHfefmhsdfI0ZQu6qJ0wgtPg==}
@@ -2324,13 +2324,13 @@ packages:
     resolution: {integrity: sha512-siPY6BD5dQ2SZPl3I0OZBHL27ZqZvLEosObsZRQ1NUB8qcxegwt0T9eKtV96JMFQpIz1elhkzqOg4c/Ri6Dp9A==}
     engines: {node: ^14.14.0 || >=16.0.0}
 
-  '@xtr-dev/payload-billing@0.1.14':
-    resolution: {integrity: sha512-P1qX5oTrE8yGKgFOuOyT2VcTp8JD/lQQp7B/clHO0DWDCjc+JKVvadLLh/nR/8ALbQfzx+tEg4f7OAOzaDc5vw==}
+  '@xtr-dev/payload-billing@0.6.0':
+    resolution: {integrity: sha512-7n9e5hh7yvgKAe3S/VbJGzX0hrmorD5k/mZ1A5qdgYZQBKk7q2GdtaGY8KhdVf0wcAWZvGjrFEh+3cHpj+ooxA==}
     engines: {node: ^18.20.2 || >=20.9.0, pnpm: ^9 || ^10}
     peerDependencies:
       '@mollie/api-client': ^3.7.0 || ^4.0.0
       payload: ^3.37.0
-      stripe: ^18.5.0
+      stripe: ^18.5.0 || ^19.0.0 || ^20.0.0 || ^21.0.0 || ^22.0.0
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -5689,9 +5689,6 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
@@ -8041,12 +8038,11 @@ snapshots:
     dependencies:
       arch: 3.0.0
 
-  '@xtr-dev/payload-billing@0.1.14(@mollie/api-client@4.3.3)(payload@3.37.0(graphql@16.12.0)(typescript@5.7.3))(stripe@18.5.0(@types/node@22.19.0))':
+  '@xtr-dev/payload-billing@0.6.0(@mollie/api-client@4.3.3)(payload@3.37.0(graphql@16.12.0)(typescript@5.7.3))(stripe@18.5.0(@types/node@22.19.0))':
     dependencies:
       '@mollie/api-client': 4.3.3
       payload: 3.37.0(graphql@16.12.0)(typescript@5.7.3)
       stripe: 18.5.0(@types/node@22.19.0)
-      zod: 3.25.76
 
   acorn-jsx@5.3.2(acorn@8.15.0):
     dependencies:
@@ -11987,7 +11983,5 @@ snapshots:
       lib0: 0.2.114
 
   yocto-queue@0.1.0: {}
-
-  zod@3.25.76: {}
 
   zwitch@2.0.4: {}

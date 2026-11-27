@@ -228,8 +228,14 @@ pnpm dev
 # Build the plugin
 pnpm build
 
-# Run tests
-pnpm test
+# Checks run by CI and before a release
+pnpm typecheck
+pnpm lint
+pnpm test        # integration tests (vitest)
+pnpm test:pack   # build, pack and import every published export
+
+# Browser tests against the demo (not part of CI)
+pnpm test:e2e
 ```
 
 ## License

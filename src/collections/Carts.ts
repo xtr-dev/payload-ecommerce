@@ -75,7 +75,9 @@ export const Carts: CollectionConfig = {
         if (data.items && Array.isArray(data.items)) {
           let subtotal = 0
           for (const item of data.items) {
-            if (typeof item.product === 'string') {
+            // IDs are strings on MongoDB and numbers on SQLite/Postgres; both mean the
+            // relationship is not populated and the product has to be loaded for its price.
+            if (typeof item.product === 'string' || typeof item.product === 'number') {
               try {
                 const product = await req.payload.findByID({
                   collection: 'products',

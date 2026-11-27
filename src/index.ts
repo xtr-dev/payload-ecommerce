@@ -1,15 +1,15 @@
 import type { CollectionConfig, Config } from 'payload'
-import { Products } from './collections/Products'
-import { Categories } from './collections/index'
-import { createOrders } from './collections/Orders'
-import { Carts } from './collections/Carts'
-import { Coupons } from './collections/Coupons'
+import { Products } from './collections/Products.js'
+import { Categories } from './collections/index.js'
+import { createOrders } from './collections/Orders.js'
+import { Carts } from './collections/Carts.js'
+import { Coupons } from './collections/Coupons.js'
 
 export type CollectionExtender = (baseCollection: CollectionConfig) => CollectionConfig
 
 export { Products, Categories, Carts, Coupons }
-export { useEcommerce } from './lib/useEcommerce'
-export type { EcommerceHelpers } from './lib/useEcommerce'
+export { useEcommerce } from './lib/useEcommerce.js'
+export type { EcommerceHelpers } from './lib/useEcommerce.js'
 
 export type PayloadEcommerceConfig = {
   collections?: {
