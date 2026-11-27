@@ -91,7 +91,8 @@ export const Coupons: CollectionConfig = {
       defaultValue: 0,
       min: 0,
       admin: {
-        description: 'Current usage count',
+        description:
+          'Orders that currently use this coupon. Counted when an order is created and given back when it is cancelled or refunded.',
         readOnly: true,
       },
     },
@@ -178,10 +179,6 @@ export const Coupons: CollectionConfig = {
           if (validFrom > validUntil) {
             throw new Error('Valid from date must be before valid until date')
           }
-        }
-
-        if (data.usageLimit && data.usageCount >= data.usageLimit) {
-          data.status = 'expired'
         }
 
         return data
