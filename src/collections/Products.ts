@@ -1,5 +1,7 @@
 import type { CollectionConfig } from 'payload'
 
+import { createSlugHook } from '../lib/slug.js'
+
 export const Products: CollectionConfig = {
   slug: 'products',
   admin: {
@@ -19,6 +21,7 @@ export const Products: CollectionConfig = {
       index: true,
       admin: {
         position: 'sidebar',
+        description: 'Leave empty to generate it from the title. Must be unique.',
       },
     },
     {
@@ -143,19 +146,7 @@ export const Products: CollectionConfig = {
     },
   ],
   hooks: {
-    beforeChange: [
-      ({ data, operation }) => {
-        if (operation === 'create' || operation === 'update') {
-          if (data.title && !data.slug) {
-            data.slug = data.title
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, '-')
-              .replace(/(^-|-$)/g, '')
-          }
-        }
-        return data
-      },
-    ],
+    beforeChange: [createSlugHook('title')],
     beforeValidate: [
       ({ data }) => {
         if (data && data.price && data.compareAtPrice) {

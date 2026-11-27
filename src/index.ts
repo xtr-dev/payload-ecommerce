@@ -21,6 +21,7 @@ export {
   isCartExpired,
 } from './lib/cartExpiry.js'
 export type { DeleteExpiredCartsOptions } from './lib/cartExpiry.js'
+export { slugify } from './lib/slug.js'
 export { calculateOrderTotal } from './lib/totals.js'
 export type { OrderTotalParts } from './lib/totals.js'
 

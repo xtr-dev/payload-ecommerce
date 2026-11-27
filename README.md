@@ -164,6 +164,10 @@ payloadEcommerce({
 })
 ```
 
+## Slugs
+
+Products and categories have a unique `slug`. Leave it empty and it is generated from the product's `title` or the category's `name` (`"Café Crème 250g"` → `cafe-creme-250g`); when that slug is already taken, a number is appended (`blue-shirt-2`, `blue-shirt-3`, …). A slug you enter yourself is kept as entered and is not regenerated when the title changes; if it is already in use, the save is rejected with a validation error on `slug`. Clear the slug to have it generated again. `slugify` is exported.
+
 ## Carts
 
 A cart belongs to a user (`userId`) or a guest session (`sessionId`) and expires 30 days after it was last changed: every change to a cart moves `expiresAt` to 30 days from now, unless the change sets `expiresAt` itself.

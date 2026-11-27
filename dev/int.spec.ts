@@ -13,6 +13,7 @@ import {
   getRelationshipId,
   isCartExpired,
   payloadEcommerce,
+  slugify,
   useEcommerce,
 } from '../src/index.js'
 
@@ -1143,6 +1144,63 @@ describe('Ecommerce Plugin integration tests', () => {
         DELETE_EXPIRED_CARTS_TASK_SLUG,
       ])
     })
+  })
+
+  describe('slugs', () => {
+    test('slugify lower-cases, strips accents and collapses other characters to dashes', () => {
+      expect(slugify('Blue Shirt')).toBe('blue-shirt')
+      expect(slugify('  Café Crème — 250g!  ')).toBe('cafe-creme-250g')
+      expect(slugify('***')).toBe('')
+    })
+
+    test.each([
+      { collection: 'products', field: 'title', extra: { price: 5 } },
+      { collection: 'categories', field: 'name', extra: {} },
+    ] as const)(
+      '$collection: an empty slug is generated from the $field, with a suffix when taken',
+      async ({ collection, extra, field }) => {
+        const create = async (data: Record<string, unknown>) =>
+          await payload.create({ collection, data: { ...extra, ...data } })
+
+        const first = await create({ [field]: 'Slug Über Test' })
+        expect(first.slug).toBe('slug-uber-test')
+
+        const second = await create({ [field]: 'Slug Über Test' })
+        expect(second.slug).toBe('slug-uber-test-2')
+
+        const third = await create({ [field]: 'slug uber test' })
+        expect(third.slug).toBe('slug-uber-test-3')
+
+        // A slug entered by the user is kept as entered, and is not regenerated when the
+        // title changes.
+        const custom = await create({ [field]: 'Slug Custom', slug: 'My_Own-Slug' })
+        expect(custom.slug).toBe('My_Own-Slug')
+        const renamed = await payload.update({
+          id: custom.id,
+          collection,
+          data: { [field]: 'Slug Custom Renamed' },
+        })
+        expect(renamed.slug).toBe('My_Own-Slug')
+
+        // A user-entered slug that is taken is rejected with a validation error, not altered.
+        await expect(create({ [field]: 'Slug Duplicate', slug: 'slug-uber-test' })).rejects.toMatchObject({
+          data: { errors: [{ path: 'slug' }] },
+          message: 'The slug "slug-uber-test" is already in use',
+          name: 'ValidationError',
+        })
+        await expect(
+          payload.update({ id: custom.id, collection, data: { slug: 'slug-uber-test-2' } }),
+        ).rejects.toThrow('The slug "slug-uber-test-2" is already in use')
+
+        // Clearing the slug generates it again; the document's own old slug is not "taken".
+        const cleared = await payload.update({ id: first.id, collection, data: { slug: '' } })
+        expect(cleared.slug).toBe('slug-uber-test')
+
+        // A title without letters or digits gives no slug.
+        const symbols = await create({ [field]: '***' })
+        expect(symbols.slug ?? null).toBeNull()
+      },
+    )
   })
 
   // The tests below run on SQLite, where document ids are numbers. The plugin used to
