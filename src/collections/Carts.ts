@@ -1,5 +1,7 @@
 import type { CollectionConfig } from 'payload'
 
+import { getRelationshipId } from '../lib/relationships.js'
+
 export const Carts: CollectionConfig = {
   slug: 'carts',
   admin: {
@@ -75,13 +77,14 @@ export const Carts: CollectionConfig = {
         if (data.items && Array.isArray(data.items)) {
           let subtotal = 0
           for (const item of data.items) {
-            // IDs are strings on MongoDB and numbers on SQLite/Postgres; both mean the
-            // relationship is not populated and the product has to be loaded for its price.
-            if (typeof item.product === 'string' || typeof item.product === 'number') {
+            const productId = getRelationshipId(item.product)
+            // A bare id (string on MongoDB, number on SQLite/Postgres) means the relationship
+            // is not populated and the product has to be loaded for its price.
+            if (productId !== undefined && typeof item.product !== 'object') {
               try {
                 const product = await req.payload.findByID({
                   collection: 'products',
-                  id: item.product,
+                  id: productId,
                 })
                 if (product?.price) {
                   subtotal += product.price * item.quantity

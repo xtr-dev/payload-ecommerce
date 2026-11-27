@@ -115,6 +115,14 @@ const result = await ecommerce.coupons.validateCoupon({
 })
 ```
 
+Document ids are strings on MongoDB and numbers on SQLite and Postgres; every helper accepts both. A relationship field holds either a bare id or the populated document, depending on `depth`. Use the exported `getRelationshipId` to read the id in both cases:
+
+```typescript
+import { getRelationshipId } from '@xtr-dev/payload-ecommerce'
+
+const productIds = cart.items.map((item) => getRelationshipId(item.product))
+```
+
 ## Example Implementation
 
 Check the `/dev` directory for a complete Next.js storefront example with:

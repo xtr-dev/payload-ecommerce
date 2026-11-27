@@ -10,6 +10,8 @@ export type CollectionExtender = (baseCollection: CollectionConfig) => Collectio
 export { Products, Categories, Carts, Coupons }
 export { useEcommerce } from './lib/useEcommerce.js'
 export type { EcommerceHelpers } from './lib/useEcommerce.js'
+export { getRelationshipId, isSameDocument } from './lib/relationships.js'
+export type { DocumentId } from './lib/relationships.js'
 
 export type PayloadEcommerceConfig = {
   collections?: {

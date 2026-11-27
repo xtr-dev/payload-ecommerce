@@ -1,7 +1,9 @@
 import type { Payload } from 'payload'
 
+import type { DocumentId } from './relationships.js'
+
 export interface GetProductsParams {
-  category?: string
+  category?: DocumentId
   status?: 'draft' | 'active' | 'archived'
   minPrice?: number
   maxPrice?: number
@@ -11,7 +13,7 @@ export interface GetProductsParams {
 }
 
 export const createProductHelpers = (payload: Payload, productsSlug = 'products') => {
-  const getProduct = async (id: string) => {
+  const getProduct = async (id: DocumentId) => {
     return await payload.findByID({
       collection: productsSlug,
       id,
@@ -73,7 +75,7 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
     })
   }
 
-  const checkInventory = async (productId: string, quantity: number, variant?: string) => {
+  const checkInventory = async (productId: DocumentId, quantity: number, variant?: string) => {
     const product = await payload.findByID({
       collection: productsSlug,
       id: productId,
@@ -99,7 +101,7 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
     return { available, quantity: product.inventory?.quantity || 0 }
   }
 
-  const reduceInventory = async (productId: string, quantity: number, variant?: string) => {
+  const reduceInventory = async (productId: DocumentId, quantity: number, variant?: string) => {
     const product = await payload.findByID({
       collection: productsSlug,
       id: productId,
@@ -137,7 +139,7 @@ export const createProductHelpers = (payload: Payload, productsSlug = 'products'
     })
   }
 
-  const restoreInventory = async (productId: string, quantity: number, variant?: string) => {
+  const restoreInventory = async (productId: DocumentId, quantity: number, variant?: string) => {
     const product = await payload.findByID({
       collection: productsSlug,
       id: productId,

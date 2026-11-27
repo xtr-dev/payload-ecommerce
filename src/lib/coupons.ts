@@ -1,11 +1,15 @@
 import type { Payload } from 'payload'
 
+import type { DocumentId } from './relationships.js'
+
+import { isSameDocument } from './relationships.js'
+
 export interface ValidateCouponParams {
   code: string
   cartTotal: number
-  userId?: string
-  productIds?: string[]
-  categoryIds?: string[]
+  userId?: DocumentId
+  productIds?: DocumentId[]
+  categoryIds?: DocumentId[]
 }
 
 export interface ApplyCouponResult {
@@ -118,10 +122,9 @@ export const createCouponHelpers = (
     }
 
     if (coupon.appliesToProducts && coupon.appliesToProducts.length > 0) {
-      const applicableProducts = coupon.appliesToProducts.map((p: any) =>
-        typeof p === 'string' ? p : p.id,
+      const hasApplicableProduct = productIds.some((id) =>
+        coupon.appliesToProducts.some((product: unknown) => isSameDocument(product, id)),
       )
-      const hasApplicableProduct = productIds.some((id) => applicableProducts.includes(id))
 
       if (!hasApplicableProduct) {
         return {
@@ -133,10 +136,9 @@ export const createCouponHelpers = (
     }
 
     if (coupon.appliesToCategories && coupon.appliesToCategories.length > 0) {
-      const applicableCategories = coupon.appliesToCategories.map((c: any) =>
-        typeof c === 'string' ? c : c.id,
+      const hasApplicableCategory = categoryIds.some((id) =>
+        coupon.appliesToCategories.some((category: unknown) => isSameDocument(category, id)),
       )
-      const hasApplicableCategory = categoryIds.some((id) => applicableCategories.includes(id))
 
       if (!hasApplicableCategory) {
         return {
@@ -168,14 +170,14 @@ export const createCouponHelpers = (
   const applyCoupon = async (
     code: string,
     cartTotal: number,
-    userId?: string,
-    productIds?: string[],
-    categoryIds?: string[],
+    userId?: DocumentId,
+    productIds?: DocumentId[],
+    categoryIds?: DocumentId[],
   ) => {
     return await validateCoupon({ code, cartTotal, userId, productIds, categoryIds })
   }
 
-  const incrementCouponUsage = async (couponId: string) => {
+  const incrementCouponUsage = async (couponId: DocumentId) => {
     const coupon = await payload.findByID({
       collection: couponsSlug,
       id: couponId,
