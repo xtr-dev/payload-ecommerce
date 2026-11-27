@@ -1,5 +1,6 @@
 import type { CollectionConfig } from 'payload'
 
+import { cartExpiryFrom } from '../lib/cartExpiry.js'
 import { getRelationshipId } from '../lib/relationships.js'
 
 export const Carts: CollectionConfig = {
@@ -61,17 +62,28 @@ export const Carts: CollectionConfig = {
       name: 'expiresAt',
       type: 'date',
       admin: {
-        description: 'Cart expiration date',
+        description:
+          'Set to 30 days after the cart was last changed. The cart helpers ignore a cart past this date.',
       },
     },
   ],
   hooks: {
     beforeChange: [
-      async ({ data, operation, req }) => {
-        if (operation === 'create' && !data.expiresAt) {
-          const expirationDate = new Date()
-          expirationDate.setDate(expirationDate.getDate() + 30)
-          data.expiresAt = expirationDate.toISOString()
+      async ({ data, operation, originalDoc, req }) => {
+        // A cart expires CART_LIFETIME_DAYS after it was last changed. On update Payload
+        // fills `data.expiresAt` with the stored value when the caller did not pass one,
+        // so "same instant as the stored value" means the caller is not setting the expiry
+        // and the cart gets a fresh one. An expiry that the caller does change is kept.
+        if (operation === 'create') {
+          if (!data.expiresAt) {
+            data.expiresAt = cartExpiryFrom()
+          }
+        } else if (operation === 'update') {
+          const stored = originalDoc?.expiresAt ? new Date(originalDoc.expiresAt).getTime() : undefined
+          const incoming = data.expiresAt ? new Date(data.expiresAt).getTime() : undefined
+          if (incoming === stored) {
+            data.expiresAt = cartExpiryFrom()
+          }
         }
 
         if (data.items && Array.isArray(data.items)) {

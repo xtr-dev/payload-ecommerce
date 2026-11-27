@@ -5,7 +5,16 @@ import { getPayload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 
 import { createOrders } from '../src/collections/Orders.js'
-import { calculateOrderTotal, getRelationshipId, useEcommerce } from '../src/index.js'
+import {
+  calculateOrderTotal,
+  CART_LIFETIME_DAYS,
+  DELETE_EXPIRED_CARTS_TASK_SLUG,
+  deleteExpiredCarts,
+  getRelationshipId,
+  isCartExpired,
+  payloadEcommerce,
+  useEcommerce,
+} from '../src/index.js'
 
 let payload: Payload
 
@@ -955,6 +964,184 @@ describe('Ecommerce Plugin integration tests', () => {
 
       const restored = await ecommerce.products.restoreInventory(product.id, 4)
       expect(restored.inventory.quantity).toBe(4)
+    })
+  })
+
+  describe('cart expiry', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+      postalCode: '1000 AA',
+      state: 'NH',
+    }
+    const dayInMs = 86_400_000
+    const daysFromNow = (days: number) => new Date(Date.now() + days * dayInMs).toISOString()
+    const daysUntil = (date: string) => (new Date(date).getTime() - Date.now()) / dayInMs
+
+    const createProduct = async (title: string) =>
+      await payload.create({ collection: 'products', data: { price: 10, status: 'active', title } })
+
+    // Passing an expiresAt that differs from the stored one is how a caller sets it.
+    const expire = async (cartId: number | string) =>
+      await payload.update({ id: cartId, collection: 'carts', data: { expiresAt: daysFromNow(-1) } })
+
+    test('a new cart expires 30 days from now', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Expiry New Cart Product')
+
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'expiry-new-session',
+      })
+
+      expect(daysUntil(cart.expiresAt)).toBeGreaterThan(CART_LIFETIME_DAYS - 0.01)
+      expect(daysUntil(cart.expiresAt)).toBeLessThanOrEqual(CART_LIFETIME_DAYS)
+      expect(isCartExpired(cart)).toBe(false)
+    })
+
+    test('changing a cart moves its expiry to 30 days from now', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Expiry Sliding Product')
+      const sessionId = 'expiry-sliding-session'
+
+      const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId })
+      // Two days left: still usable, but close to expiring.
+      const closing = await payload.update({
+        id: cart.id,
+        collection: 'carts',
+        data: { expiresAt: daysFromNow(2) },
+      })
+      expect(daysUntil(closing.expiresAt)).toBeLessThan(2.01)
+
+      const updated = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId })
+      expect(updated.id).toBe(cart.id)
+      expect(updated.items[0].quantity).toBe(2)
+      expect(daysUntil(updated.expiresAt)).toBeGreaterThan(CART_LIFETIME_DAYS - 0.01)
+    })
+
+    test('an expired cart is treated as absent and a new cart is created', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Expiry Absent Product')
+      const sessionId = 'expiry-absent-session'
+
+      const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 3, sessionId })
+      const expired = await expire(cart.id)
+      expect(isCartExpired(expired)).toBe(true)
+
+      expect(await ecommerce.cart.getCart(undefined, sessionId)).toBeNull()
+      await expect(
+        ecommerce.cart.updateCartItem({ cartId: cart.id, productId: product.id, quantity: 1 }),
+      ).rejects.toThrow('Cart not found')
+      await expect(
+        ecommerce.cart.removeFromCart({ cartId: cart.id, productId: product.id }),
+      ).rejects.toThrow('Cart not found')
+      await expect(ecommerce.cart.clearCart(cart.id)).rejects.toThrow('Cart not found')
+
+      const fresh = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, sessionId })
+      expect(fresh.id).not.toBe(cart.id)
+      expect(fresh.items).toHaveLength(1)
+      expect(fresh.items[0].quantity).toBe(1)
+      expect((await ecommerce.cart.getCart(undefined, sessionId)).id).toBe(fresh.id)
+    })
+
+    test('an expired cart cannot be turned into an order', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Expiry Order Product')
+
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'expiry-order-session',
+      })
+      await expire(cart.id)
+
+      await expect(
+        ecommerce.orders.createOrderFromCart({
+          cartId: cart.id,
+          orderData: { shippingAddress: address },
+        }),
+      ).rejects.toThrow('Cart has expired')
+      expect(
+        (
+          await payload.count({
+            collection: 'orders',
+            where: { 'items.product': { equals: product.id } },
+          })
+        ).totalDocs,
+      ).toBe(0)
+    })
+
+    test('deleteExpiredCarts deletes expired carts only', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Expiry Cleanup Product')
+
+      const expired = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'expiry-cleanup-expired',
+      })
+      const active = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'expiry-cleanup-active',
+      })
+      await expire(expired.id)
+
+      const { deleted } = await deleteExpiredCarts(payload)
+      // Earlier tests in this file left expired carts behind as well.
+      expect(deleted).toBeGreaterThanOrEqual(1)
+
+      const remaining = await payload.find({
+        collection: 'carts',
+        where: { id: { in: [expired.id, active.id] } },
+      })
+      expect(remaining.docs.map((cart) => cart.id)).toEqual([active.id])
+      expect(await deleteExpiredCarts(payload)).toEqual({ deleted: 0 })
+    })
+
+    // The dev config sets cartCleanupTask, which registers the task without scheduling it.
+    test('the opt-in jobs task deletes expired carts when the host queues and runs it', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Expiry Task Product')
+
+      expect(
+        payload.config.jobs.tasks.filter((task) => task.slug === DELETE_EXPIRED_CARTS_TASK_SLUG),
+      ).toHaveLength(1)
+
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'expiry-task-session',
+      })
+      await expire(cart.id)
+
+      await payload.jobs.queue({ input: {}, task: DELETE_EXPIRED_CARTS_TASK_SLUG as never })
+      await payload.jobs.run()
+
+      const { totalDocs } = await payload.count({
+        collection: 'carts',
+        where: { id: { equals: cart.id } },
+      })
+      expect(totalDocs).toBe(0)
+    })
+
+    test('the jobs task is not registered unless the plugin option asks for it', () => {
+      const withoutOption = payloadEcommerce()({ collections: [] })
+      expect(withoutOption.jobs).toBeUndefined()
+
+      const existingTask = { slug: 'host-task', handler: () => ({ output: {} }) }
+      const withOption = payloadEcommerce({ cartCleanupTask: true })({
+        collections: [],
+        jobs: { tasks: [existingTask] },
+      })
+      expect(withOption.jobs?.tasks?.map((task) => task.slug)).toEqual([
+        'host-task',
+        DELETE_EXPIRED_CARTS_TASK_SLUG,
+      ])
     })
   })
 

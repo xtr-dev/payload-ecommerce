@@ -51,6 +51,9 @@ export default buildConfig({
   },
   plugins: [
     payloadEcommerce({
+      // Registers the jobs task that deletes expired carts. The demo does not schedule it;
+      // queue it with payload.jobs.queue({ task: 'ecommerce-delete-expired-carts', input: {} }).
+      cartCleanupTask: true,
       hooks: {
         // Used by the integration tests to check that a failing afterCreateOrder hook
         // leaves no order and no stock change behind. Real orders never carry this note.
