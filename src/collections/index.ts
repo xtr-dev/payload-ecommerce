@@ -1,8 +1,8 @@
-import { Products } from './Products'
-import { Categories } from './Categories'
-import { Orders } from './Orders'
-import { Carts } from './Carts'
-import { Coupons } from './Coupons'
+import { Products } from './Products.js'
+import { Categories } from './Categories.js'
+import { Orders } from './Orders.js'
+import { Carts } from './Carts.js'
+import { Coupons } from './Coupons.js'
 
 export { Products, Categories, Orders, Carts, Coupons }
 
