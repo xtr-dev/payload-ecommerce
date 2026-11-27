@@ -5,7 +5,8 @@ import { REST_GET, REST_PATCH, REST_POST } from '@payloadcms/next/routes'
 import { getPayload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
-import { createOrders } from '../src/collections/Orders.js'
+import { createOrders as createOrdersCollection } from '../src/collections/Orders.js'
+import { DEFAULT_ECOMMERCE_SLUGS } from '../src/lib/slugs.js'
 import {
   calculateOrderTotal,
   CART_LIFETIME_DAYS,
@@ -22,6 +23,10 @@ import {
 } from '../src/index.js'
 
 let payload: Payload
+
+/** The orders collection as the plugin builds it for the default collection slugs. */
+const createOrders = (options: Parameters<typeof createOrdersCollection>[0] = {}) =>
+  createOrdersCollection(options, DEFAULT_ECOMMERCE_SLUGS)
 
 /** True when the suite runs against MongoDB (`pnpm test:mongo`) instead of the default SQLite. */
 const usesMongoDB = process.env.DATABASE_ADAPTER === 'mongodb'

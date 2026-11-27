@@ -41,8 +41,8 @@ pnpm dev:generate-types    # Regenerate Payload types
 
 ### Exports
 - `.` - Plugin, collections, `useEcommerce(payload)` server helpers and utilities (`calculateOrderTotal`, `deleteExpiredCarts`, `slugify`, `getRelationshipId`, ...)
-- `./client` - React hooks `useCart`, `useProducts`, `useOrders`. They call cart/order endpoints the plugin does not register (only the demo app has them)
-- `./rsc` - React Server Components
+
+There is only the root export: no `/client` or `/rsc` entry points, no React code and no endpoints.
 
 ### Configuration Options
 
@@ -55,6 +55,8 @@ payloadEcommerce({
     carts: 'carts' | CollectionExtender,
     coupons: 'coupons' | CollectionExtender,
   },
+  userCollection: 'users', // relationTo of orders.user and carts.user; owners in the access rules
+  mediaCollection: 'media', // relationTo of products.images
   // Who manages the shop; default: user.role === 'admin' or user.roles includes 'admin'
   isAdmin: ({ req }) => boolean,
   // Registers the 'ecommerce-delete-expired-carts' jobs task (not scheduled)
@@ -64,10 +66,14 @@ payloadEcommerce({
     afterCreateOrder: async (order) => {}, // throwing here fails the order
     calculateTax: (orderData) => number,
   },
+  disabled: boolean, // keep collections (fields + access), drop the plugin's collection hooks and the task
 })
 ```
 
-The option type also lists `payments`, `emails`, `shipping`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are not implemented: accepted but ignored. `userCollection` is only used by the access rules.
+Every option is implemented; do not add options that nothing reads.
+
+### Slugs
+No collection slug is hardcoded. The collections are factories (`createProducts(slugs)`, ...) in `src/collections/`; `src/index.ts` builds them twice (first to learn the slug a CollectionExtender returns, then with the final slugs in every `relationTo` and hook) and records the result in `config.custom['payload-ecommerce'].slugs`. Helpers read it with `getEcommerceSlugs(payload)` (`src/lib/slugs.ts`). `dev/payload.renamed.config.ts` + `dev/renamed.spec.ts` run the plugin with every slug renamed.
 
 ### Access control
 `src/lib/access.ts` builds the default `access` of every collection (products/categories: public read, admin write; coupons: admin only; orders: owner read, admin write; carts: owner read/create/update, admin all; guest carts and orders: admin only). The plugin applies it before a CollectionExtender runs. Hooks and internal bookkeeping call the Local API with an explicit `overrideAccess: true`; the `useEcommerce` helpers do too unless the caller passes `{ overrideAccess: false, user | req }`. The dev app's `users` collection has a `role` field for this.
@@ -94,7 +100,7 @@ Payload fills `data` with the stored value of fields an update leaves out before
 | `src/collections/Categories.ts` | Product categories |
 | `src/collections/Coupons.ts` | Discount codes |
 | `src/lib/useEcommerce.ts` | Server helpers (`cart`, `orders`, `coupons`, `products`) |
-| `src/exports/client.tsx` | Client-side hooks |
+| `src/lib/slugs.ts` | Resolved collection slugs (`getEcommerceSlugs`) |
 | `dev/payload.config.ts` | Development configuration |
 
 ## Integration with payload-billing
@@ -128,4 +134,4 @@ billingPlugin({
 
 ## Tests
 
-Integration tests are in `dev/int.spec.ts`. `pnpm test` runs them against a temporary SQLite database (numeric ids, no transactions) and `pnpm test:mongo` against an in-memory MongoDB replica set (string ids, transactions); CI runs both, so a test must not assume an id type. For operations started at the same time, use the `settleConcurrently` helper in that file: it retries MongoDB's transient write conflicts. Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.
+Integration tests are in `dev/int.spec.ts` (default slugs) and `dev/renamed.spec.ts` (every collection renamed, own database). `pnpm test` runs them against a temporary SQLite database (numeric ids, no transactions) and `pnpm test:mongo` against an in-memory MongoDB replica set (string ids, transactions); CI runs both, so a test must not assume an id type. For operations started at the same time, use the `settleConcurrently` helper in that file: it retries MongoDB's transient write conflicts. Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.

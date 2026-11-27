@@ -17,7 +17,7 @@
 - 💰 **Tax** - A `calculateTax` hook you implement (fixed rate, per region, or a call to a tax service)
 - 🔧 **Helpers** - `useEcommerce(payload)` for carts, orders, coupons and products on the server
 
-Not included: payment processing, emails and shipping rates. Payments are shown in the demo app with [@xtr-dev/payload-billing](https://github.com/xtr-dev/payload-billing); see [Not implemented yet](#not-implemented-yet).
+Not included: payment processing, emails and shipping rates. Payments are shown in the demo app with [@xtr-dev/payload-billing](https://github.com/xtr-dev/payload-billing); see [Not included](#not-included).
 
 ## Quick Start
 
@@ -35,20 +35,29 @@ import { payloadEcommerce } from '@xtr-dev/payload-ecommerce'
 export default buildConfig({
   plugins: [
     payloadEcommerce({
-      // Optional: customize collection slugs
-      collections: {
-        products: 'products',
-        orders: 'orders',
-        categories: 'categories',
-        carts: 'carts',
-        coupons: 'coupons',
-      },
+      // All options are optional; see "Options" below
     }),
   ],
 })
 ```
 
-The plugin adds the five collections below. Orders and carts relate to a `users` collection, and products to a `media` collection, which your config has to provide.
+The plugin adds the five collections below. Orders and carts relate to your users collection and product images to your media collection; your config has to provide both (`users` and `media` unless you set `userCollection` / `mediaCollection`).
+
+### Options
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `collections.products` / `categories` / `orders` / `carts` / `coupons` | default slugs | A string renames the collection; a function extends it (see [Extending Collections](#extending-collections)) |
+| `userCollection` | `'users'` | Auth collection the `user` field of orders and carts relates to, and whose users own their carts and orders |
+| `mediaCollection` | `'media'` | Upload collection product `images` relate to |
+| `isAdmin` | `role === 'admin'` or `roles` includes `'admin'` | Who manages the shop (see [Access control](#access-control)) |
+| `cartCleanupTask` | `false` | Registers the jobs task that deletes expired carts (see [Carts](#carts-1)) |
+| `hooks.calculateTax` | – | Returns the tax of an order (see [Tax Configuration](#tax-configuration)) |
+| `hooks.beforeCreateOrder` | – | Receives and returns the data of a new order, after coupon and tax and before the total is computed |
+| `hooks.afterCreateOrder` | – | Runs after a new order took its stock; throwing fails the order |
+| `disabled` | `false` | Keeps the collections (fields and access rules, so the database schema does not change) but removes the plugin's collection hooks and does not register the cart cleanup task |
+
+Renaming works everywhere: relationships between the collections, hooks and the server helpers all follow the configured slugs, so `useEcommerce(payload)` needs no slug arguments. `getEcommerceSlugs(payload)` returns the slugs in use.
 
 The collections are locked down by default: only an admin can manage them, and by default an admin is a user with `role: 'admin'`. Read [Access control](#access-control) before you open the admin panel.
 
@@ -235,7 +244,7 @@ Visit `http://localhost:3000`
 
 ## Extending Collections
 
-Pass a function to extend collections with custom fields:
+Pass a function to extend a collection with custom fields, hooks or access rules. It may also return another `slug` to rename the collection. The function is called twice while the config is built, so it should only return a new collection and have no side effects:
 
 ```typescript
 payloadEcommerce({
@@ -407,11 +416,10 @@ Limits:
 
 The helpers `ecommerce.products.checkInventory`, `reduceInventory` (throws when stock is short) and `restoreInventory`, and `ecommerce.coupons.incrementCouponUsage` / `decrementCouponUsage` use the same atomic statements, for stock movements that are not orders. They take an optional `{ req }` as last argument to run inside a transaction.
 
-## Not implemented yet
+## Not included
 
-The plugin's option type also lists `payments`, `emails`, `shipping`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are accepted but have no effect yet. `userCollection` is only used by the access rules; the `user` relationships still point at `users`. The options that work are `collections`, `isAdmin`, `cartCleanupTask` and the hooks `calculateTax`, `beforeCreateOrder` and `afterCreateOrder`.
-
-The `@xtr-dev/payload-ecommerce/client` hooks (`useCart`, `useProducts`, `useOrders`) call cart and order endpoints that the plugin does not register; they only work against routes like the ones in the demo app.
+- Payments, emails and shipping rates. Set `paymentStatus`, `shipping` and the like from your own integration (the demo uses @xtr-dev/payload-billing).
+- REST endpoints for carts and checkout, and React hooks or components. Call `useEcommerce(payload)` from your own server actions or route handlers, as the demo does.
 
 ## Development
 

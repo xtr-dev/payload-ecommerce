@@ -1,9 +1,11 @@
 import type { CollectionConfig } from 'payload'
 
+import type { EcommerceSlugs } from '../lib/slugs.js'
+
 import { createSlugHook } from '../lib/slug.js'
 
-export const Products: CollectionConfig = {
-  slug: 'products',
+export const createProducts = (slugs: EcommerceSlugs): CollectionConfig => ({
+  slug: slugs.products,
   admin: {
     useAsTitle: 'title',
     defaultColumns: ['title', 'price', 'status', 'updatedAt'],
@@ -84,13 +86,13 @@ export const Products: CollectionConfig = {
     {
       name: 'images',
       type: 'relationship',
-      relationTo: 'media',
+      relationTo: slugs.media,
       hasMany: true,
     },
     {
       name: 'categories',
       type: 'relationship',
-      relationTo: 'categories',
+      relationTo: slugs.categories,
       hasMany: true,
     },
     {
@@ -158,4 +160,4 @@ export const Products: CollectionConfig = {
       },
     ],
   },
-}
+})

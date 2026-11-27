@@ -24,12 +24,6 @@
       ],
       "payload-ecommerce": [
         "../src/index.ts"
-      ],
-      "payload-ecommerce/client": [
-        "../src/exports/client.ts"
-      ],
-      "payload-ecommerce/rsc": [
-        "../src/exports/rsc.ts"
       ]
     },
     "noEmit": true,

@@ -4,17 +4,10 @@ import { createCartHelpers } from './cart.js'
 import { createOrderHelpers } from './orders.js'
 import { createCouponHelpers } from './coupons.js'
 import { createProductHelpers } from './products.js'
+import { getEcommerceSlugs } from './slugs.js'
 
-export interface EcommerceSlugs {
-  products?: string
-  orders?: string
-  categories?: string
-  carts?: string
-  coupons?: string
-}
-
-/** Collection slugs (when renamed) and how the helpers call the Local API. */
-export interface EcommerceHelperOptions extends EcommerceSlugs, HelperAccessOptions {}
+/** How the helpers call the Local API: with full access (default) or as a user. */
+export type EcommerceHelperOptions = HelperAccessOptions
 
 /**
  * Creates the plugin's server helpers. Use them in server code only (server actions, route
@@ -30,16 +23,13 @@ export interface EcommerceHelperOptions extends EcommerceSlugs, HelperAccessOpti
  * the inventory helpers always run with full access.
  */
 export const useEcommerce = (payload: Payload, options: EcommerceHelperOptions = {}) => {
-  const { carts, categories: _categories, coupons: couponsOption, orders: ordersOption, products: productsOption, ...access } = options
-  const productsSlug = productsOption || 'products'
-  const ordersSlug = ordersOption || 'orders'
-  const cartsSlug = carts || 'carts'
-  const couponsSlug = couponsOption || 'coupons'
+  // The slugs the plugin recorded in the config, so renamed collections need no arguments here.
+  const slugs = getEcommerceSlugs(payload)
 
-  const cart = createCartHelpers(payload, cartsSlug, access)
-  const orders = createOrderHelpers(payload, ordersSlug, cartsSlug, productsSlug, couponsSlug, access)
-  const coupons = createCouponHelpers(payload, couponsSlug, ordersSlug, access)
-  const products = createProductHelpers(payload, productsSlug, access)
+  const cart = createCartHelpers(payload, slugs.carts, options)
+  const orders = createOrderHelpers(payload, slugs.orders, slugs.carts, slugs.products, slugs.coupons, options)
+  const coupons = createCouponHelpers(payload, slugs.coupons, slugs.orders, options)
+  const products = createProductHelpers(payload, slugs.products, options)
 
   return {
     cart,

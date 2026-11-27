@@ -21,12 +21,10 @@ npm_config_cache="$consumer_directory/npm-cache" npm install \
   --legacy-peer-deps \
   "$package_tarball"
 
-# The main entry point imports Payload at runtime (for its error classes) and the /client
-# and /rsc entry points import React. The install above is offline and skips peer
-# dependencies, so the consumer borrows the repository's own copies, the same way a host
-# application would provide them.
+# The main entry point imports Payload at runtime (for its error classes). The install
+# above is offline and skips peer dependencies, so the consumer borrows the repository's
+# own copy, the same way a host application would provide it.
 ln -s "$repository_directory/node_modules/payload" node_modules/payload
-ln -s "$repository_directory/node_modules/react" node_modules/react
 
 node --input-type=module --eval '
   import { existsSync } from "node:fs"
@@ -36,7 +34,7 @@ node --input-type=module --eval '
   const packageDirectory = "node_modules/@xtr-dev/payload-ecommerce"
   const packageJson = JSON.parse(await readFile(join(packageDirectory, "package.json"), "utf8"))
 
-  const expectedSubpaths = [".", "./client", "./rsc"]
+  const expectedSubpaths = ["."]
   const publishedSubpaths = Object.keys(packageJson.exports).sort()
   if (JSON.stringify(publishedSubpaths) !== JSON.stringify(expectedSubpaths)) {
     throw new Error(`Expected exports ${expectedSubpaths.join(", ")} but the tarball has ${publishedSubpaths.join(", ")}`)

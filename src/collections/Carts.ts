@@ -1,11 +1,17 @@
 import type { CollectionConfig } from 'payload'
 
+import type { EcommerceAccess } from '../lib/access.js'
+import type { EcommerceSlugs } from '../lib/slugs.js'
+
 import { cartExpiryFrom } from '../lib/cartExpiry.js'
 import { resolveUnitPrice } from '../lib/pricing.js'
 import { getRelationshipId } from '../lib/relationships.js'
 
-export const Carts: CollectionConfig = {
-  slug: 'carts',
+export const createCarts = (
+  slugs: EcommerceSlugs,
+  ownerFieldAccess: EcommerceAccess['cartOwnerField'],
+): CollectionConfig => ({
+  slug: slugs.carts,
   admin: {
     useAsTitle: 'id',
     defaultColumns: ['user', 'sessionId', 'subtotal', 'expiresAt', 'updatedAt'],
@@ -14,7 +20,8 @@ export const Carts: CollectionConfig = {
     {
       name: 'user',
       type: 'relationship',
-      relationTo: 'users',
+      relationTo: slugs.users,
+      access: ownerFieldAccess,
       admin: {
         description: 'Logged-in user (optional)',
       },
@@ -22,6 +29,7 @@ export const Carts: CollectionConfig = {
     {
       name: 'sessionId',
       type: 'text',
+      access: ownerFieldAccess,
       index: true,
       admin: {
         description: 'Session ID for guest users',
@@ -34,7 +42,7 @@ export const Carts: CollectionConfig = {
         {
           name: 'product',
           type: 'relationship',
-          relationTo: 'products',
+          relationTo: slugs.products,
           required: true,
         },
         {
@@ -97,7 +105,7 @@ export const Carts: CollectionConfig = {
             if (productId !== undefined && typeof item.product !== 'object') {
               try {
                 product = await req.payload.findByID({
-                  collection: 'products',
+                  collection: slugs.products,
                   id: productId,
                   depth: 0,
                   // The price is needed whoever saves the cart, also for a product the
@@ -121,4 +129,4 @@ export const Carts: CollectionConfig = {
       },
     ],
   },
-}
+})
