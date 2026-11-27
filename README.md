@@ -140,6 +140,20 @@ resolveUnitPrice(product, 'Large') // the variant's own price when it has one, e
 
 A variant price of `0` is a real price (a free variant); leave the field empty to use the product's price. A variant name the product does not have is priced at the product's price. Use the same function wherever your storefront shows a line price, so it matches the subtotal.
 
+### Cart lines
+
+A cart holds one line per product + variant combination, so two variants of one product are two lines. `addToCart`, `updateCartItem` and `removeFromCart` all take the variant to say which line is meant; leaving it out means the line without a variant, never "any line of this product":
+
+```typescript
+// Sets the quantity of the "Medium" line only (0 or less removes that line)
+await ecommerce.cart.updateCartItem({ cartId, productId, variant: 'Medium', quantity: 3 })
+
+// Removes the "Medium" line only
+await ecommerce.cart.removeFromCart({ cartId, productId, variant: 'Medium' })
+```
+
+`updateCartItem` throws `Item not found in cart` when the cart has no line for that combination. The exported `isSameCartLine(item, productId, variant)` is the comparison the helpers use.
+
 ## Example Implementation
 
 The `/dev` directory holds a Next.js storefront built on the plugin:
