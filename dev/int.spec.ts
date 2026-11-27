@@ -5,7 +5,7 @@ import { getPayload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 
 import { createOrders } from '../src/collections/Orders.js'
-import { calculateOrderTotal, useEcommerce } from '../src/index.js'
+import { calculateOrderTotal, getRelationshipId, useEcommerce } from '../src/index.js'
 
 let payload: Payload
 
@@ -358,6 +358,276 @@ describe('Ecommerce Plugin integration tests', () => {
         req: { payload } as never,
       })
       expect(updated.total).toBe(35)
+    })
+  })
+
+  // How a coupon reaches an order: the caller passes the coupon (id, or code through
+  // createOrderFromCart) and the orders collection validates it and sets the discount and,
+  // for a free shipping coupon, the shipping cost. The dev config taxes 10% of
+  // (subtotal − discount).
+  describe('coupons on orders', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+      postalCode: '1000 AA',
+      state: 'NH',
+    }
+
+    const createProduct = async (title: string, price: number, extra: Record<string, unknown> = {}) =>
+      await payload.create({
+        collection: 'products',
+        data: { price, status: 'active', title, ...extra },
+      })
+
+    const createOrderWith = async (
+      product: { id: number | string; price: number },
+      extra: Record<string, unknown>,
+    ) =>
+      await payload.create({
+        collection: 'orders',
+        data: {
+          billingAddress: address,
+          items: [{ price: product.price, product: product.id, quantity: 1, total: product.price }],
+          shippingAddress: address,
+          subtotal: product.price,
+          ...extra,
+        },
+      })
+
+    test('coupon codes are stored in upper case and found in any case', async () => {
+      const ecommerce = useEcommerce(payload)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: ' lowercase15 ', status: 'active', type: 'percentage', value: 15 },
+      })
+      expect(coupon.code).toBe('LOWERCASE15')
+
+      const result = await ecommerce.coupons.validateCoupon({ cartTotal: 200, code: 'Lowercase15' })
+      expect(result).toMatchObject({ discount: 30, freeShipping: false, valid: true })
+    })
+
+    test('validateCoupon reports a free shipping coupon with freeShipping and no discount', async () => {
+      const ecommerce = useEcommerce(payload)
+      await payload.create({
+        collection: 'coupons',
+        data: { code: 'SHIPFREE', status: 'active', type: 'freeShipping' },
+      })
+
+      const result = await ecommerce.coupons.validateCoupon({ cartTotal: 40, code: 'SHIPFREE' })
+      expect(result).toMatchObject({ discount: 0, freeShipping: true, valid: true })
+
+      const missing = await ecommerce.coupons.validateCoupon({ cartTotal: 40, code: 'NOSUCHCODE' })
+      expect(missing).toMatchObject({ discount: 0, freeShipping: false, valid: false })
+    })
+
+    test('validateCoupon caps a discount at the cart total', async () => {
+      const ecommerce = useEcommerce(payload)
+      await payload.create({
+        collection: 'coupons',
+        data: { code: 'FIXED50', status: 'active', type: 'fixed', value: 50 },
+      })
+
+      const result = await ecommerce.coupons.validateCoupon({ cartTotal: 30, code: 'FIXED50' })
+      expect(result).toMatchObject({ discount: 30, valid: true })
+    })
+
+    test('an order with a free shipping coupon ships for zero', async () => {
+      const product = await createProduct('Free Shipping Product', 40)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'SHIPFREEORDER', status: 'active', type: 'freeShipping' },
+      })
+
+      const order = await createOrderWith(product, { coupon: coupon.id, shipping: 10 })
+
+      expect(order.shipping).toBe(0)
+      expect(order.discount).toBe(0)
+      expect(order.tax).toBe(4)
+      expect(order.total).toBe(44)
+    })
+
+    test('an order with a coupon gets the discount computed by the plugin, not the caller', async () => {
+      const product = await createProduct('Coupon Discount Product', 80)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'QUARTER', maxDiscount: 15, status: 'active', type: 'percentage', value: 25 },
+      })
+
+      const order = await createOrderWith(product, { coupon: coupon.id, discount: 79, shipping: 5 })
+
+      // 25% of 80 is 20, capped at maxDiscount 15; tax is 10% of (80 − 15).
+      expect(order.discount).toBe(15)
+      expect(order.tax).toBe(6.5)
+      expect(order.total).toBe(76.5)
+    })
+
+    test('an order without a coupon keeps the discount passed by the caller', async () => {
+      const product = await createProduct('Manual Discount Product', 80)
+
+      const order = await createOrderWith(product, { discount: 30 })
+
+      expect(order.discount).toBe(30)
+      expect(order.total).toBe(55)
+    })
+
+    test.each([
+      { name: 'an inactive coupon', data: { status: 'inactive' }, error: 'not active' },
+      {
+        name: 'a coupon that is not valid yet',
+        data: { validFrom: new Date(Date.now() + 86_400_000).toISOString() },
+        error: 'not yet valid',
+      },
+      {
+        name: 'a coupon past its end date',
+        // The coupons collection marks such a coupon expired when it is saved.
+        data: { validUntil: new Date(Date.now() - 86_400_000).toISOString() },
+        error: 'not active',
+      },
+      {
+        name: 'a coupon whose usage limit is reached',
+        // The coupons collection marks such a coupon expired when it is saved.
+        data: { usageCount: 3, usageLimit: 3 },
+        error: 'not active',
+      },
+      { name: 'a cart below the minimum purchase', data: { minPurchase: 500 }, error: 'Minimum purchase' },
+    ])('an order with $name is rejected', async ({ data, error, name }) => {
+      const product = await createProduct(`Rejected Coupon Product ${name}`, 50)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: {
+          code: `REJECT-${name.replace(/[^a-z]/gi, '')}`,
+          status: 'active',
+          type: 'percentage',
+          value: 10,
+          ...data,
+        },
+      })
+
+      await expect(createOrderWith(product, { coupon: coupon.id })).rejects.toMatchObject({
+        data: { errors: [{ message: expect.stringContaining(error), path: 'coupon' }] },
+        name: 'ValidationError',
+      })
+    })
+
+    test('usage limit is enforced while the coupon is still active', async () => {
+      const product = await createProduct('Usage Limit Product', 50)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'ONCEONLY', status: 'active', type: 'fixed', usageLimit: 1, value: 5 },
+      })
+
+      const first = await createOrderWith(product, { coupon: coupon.id })
+      expect(first.discount).toBe(5)
+
+      await expect(createOrderWith(product, { coupon: coupon.id })).rejects.toThrow()
+    })
+
+    test('product and category restrictions are checked against the order items', async () => {
+      const category = await payload.create({
+        collection: 'categories',
+        data: { name: 'Order Coupon Category' },
+      })
+      const inCategory = await createProduct('Order Coupon In Category', 60, {
+        categories: [category.id],
+      })
+      const outside = await createProduct('Order Coupon Outside', 60)
+
+      const categoryCoupon = await payload.create({
+        collection: 'coupons',
+        data: {
+          appliesToCategories: [category.id],
+          code: 'ORDERCATEGORY',
+          status: 'active',
+          type: 'fixed',
+          value: 6,
+        },
+      })
+      const productCoupon = await payload.create({
+        collection: 'coupons',
+        data: {
+          appliesToProducts: [inCategory.id],
+          code: 'ORDERPRODUCT',
+          status: 'active',
+          type: 'fixed',
+          value: 6,
+        },
+      })
+
+      expect((await createOrderWith(inCategory, { coupon: categoryCoupon.id })).discount).toBe(6)
+      expect((await createOrderWith(inCategory, { coupon: productCoupon.id })).discount).toBe(6)
+
+      await expect(createOrderWith(outside, { coupon: categoryCoupon.id })).rejects.toMatchObject({
+        data: { errors: [{ message: expect.stringContaining('categories'), path: 'coupon' }] },
+      })
+      await expect(createOrderWith(outside, { coupon: productCoupon.id })).rejects.toMatchObject({
+        data: { errors: [{ message: expect.stringContaining('products'), path: 'coupon' }] },
+      })
+    })
+
+    test('the per-customer limit counts the earlier orders of that customer', async () => {
+      const product = await createProduct('Customer Limit Product', 50)
+      const user = await payload.create({
+        collection: 'users',
+        data: { email: 'customer-limit@example.com', password: 'customer-limit-password' },
+      })
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'ONEPERCUSTOMER', customerLimit: 1, status: 'active', type: 'fixed', value: 5 },
+      })
+
+      await createOrderWith(product, { coupon: coupon.id, user: user.id })
+
+      await expect(
+        createOrderWith(product, { coupon: coupon.id, user: user.id }),
+      ).rejects.toMatchObject({
+        data: { errors: [{ message: expect.stringContaining('Customer usage limit') }] },
+      })
+
+      // An order without a customer is not held to the per-customer limit.
+      const guest = await createOrderWith(product, { coupon: coupon.id })
+      expect(guest.discount).toBe(5)
+    })
+
+    test('createOrderFromCart applies a coupon given by code', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Cart Coupon Code Product', 30)
+      await payload.create({
+        collection: 'coupons',
+        data: { code: 'CARTSHIPFREE', status: 'active', type: 'freeShipping' },
+      })
+
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 2,
+        sessionId: 'cart-coupon-code-session',
+      })
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: { couponCode: 'cartshipfree', shipping: 9, shippingAddress: address },
+      })
+
+      expect(order.shipping).toBe(0)
+      expect(order.total).toBe(66)
+      expect(getRelationshipId(order.coupon)).toBeDefined()
+
+      const secondCart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'cart-coupon-code-session',
+      })
+      await expect(
+        ecommerce.orders.createOrderFromCart({
+          cartId: secondCart.id,
+          orderData: { couponCode: 'DOESNOTEXIST', shippingAddress: address },
+        }),
+      ).rejects.toThrow('Coupon not found')
+      // A rejected order leaves the cart as it was.
+      const cartAfter = await payload.findByID({ id: secondCart.id, collection: 'carts' })
+      expect(cartAfter.items).toHaveLength(1)
     })
   })
 

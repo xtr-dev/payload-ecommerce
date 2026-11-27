@@ -1,7 +1,9 @@
 import type { CollectionConfig } from 'payload'
+import { ValidationError } from 'payload'
 import type { PayloadEcommerceConfig } from '../index.js'
 import { createProductHelpers } from '../lib/products.js'
-import { createCouponHelpers } from '../lib/coupons.js'
+import { createCouponHelpers, evaluateCoupon } from '../lib/coupons.js'
+import type { DocumentId } from '../lib/relationships.js'
 import { getRelationshipId } from '../lib/relationships.js'
 import { calculateOrderTotal } from '../lib/totals.js'
 
@@ -297,6 +299,10 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
       name: 'coupon',
       type: 'relationship',
       relationTo: 'coupons',
+      admin: {
+        description:
+          'On a new order the coupon is validated and sets the discount (or zeroes shipping for a free shipping coupon). Changing it later does not recalculate the order.',
+      },
     },
     {
       name: 'trackingNumber',
@@ -315,13 +321,85 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
   ],
     hooks: {
       beforeChange: [
-        async ({ data, operation, originalDoc, req }) => {
+        async ({ collection, data, operation, originalDoc, req }) => {
           if (operation === 'create' && !data.orderNumber) {
             const timestamp = Date.now()
             const random = Math.floor(Math.random() * 1000)
               .toString()
               .padStart(3, '0')
             data.orderNumber = `ORD-${timestamp}-${random}`
+          }
+
+          // A coupon on a new order is applied here rather than trusted from the caller: the
+          // coupon is checked against this order and decides the discount (and, for a free
+          // shipping coupon, the shipping cost). This happens before tax and total are
+          // calculated so both see the coupon's effect.
+          const couponId = operation === 'create' ? getRelationshipId(data.coupon) : undefined
+          if (couponId !== undefined) {
+            // disableErrors makes a missing coupon come back as null instead of throwing, so
+            // it is reported as a validation error on the coupon field below.
+            const coupon = await req.payload.findByID({
+              id: couponId,
+              collection: couponsSlug,
+              depth: 0,
+              disableErrors: true,
+              req,
+            })
+
+            const productIds: DocumentId[] = []
+            const categoryIds: DocumentId[] = []
+            for (const item of data.items || []) {
+              const productId = getRelationshipId(item.product)
+              if (productId === undefined) {
+                continue
+              }
+              productIds.push(productId)
+
+              // Categories are only needed for category-restricted coupons; they come from
+              // the populated product when there is one and are loaded otherwise.
+              if (coupon?.appliesToCategories?.length) {
+                const product =
+                  typeof item.product === 'object' && item.product !== null
+                    ? item.product
+                    : await req.payload.findByID({
+                        id: productId,
+                        collection: productsSlug,
+                        depth: 0,
+                        disableErrors: true,
+                        req,
+                      })
+                for (const category of product?.categories || []) {
+                  const categoryId = getRelationshipId(category)
+                  if (categoryId !== undefined) {
+                    categoryIds.push(categoryId)
+                  }
+                }
+              }
+            }
+
+            const result = await evaluateCoupon(req.payload, coupon, {
+              cartTotal: data.subtotal || 0,
+              categoryIds,
+              ordersSlug: collection.slug,
+              productIds,
+              req,
+              userId: getRelationshipId(data.user),
+            })
+
+            if (!result.valid) {
+              throw new ValidationError(
+                {
+                  collection: collection.slug,
+                  errors: [{ message: result.error || 'Coupon is not valid', path: 'coupon' }],
+                },
+                req.t,
+              )
+            }
+
+            data.discount = result.discount
+            if (result.freeShipping) {
+              data.shipping = 0
+            }
           }
 
           // Payload fills `data` with the stored value of every field the caller left out
