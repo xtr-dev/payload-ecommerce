@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working in the @xtr-dev/payload-
 
 ## Project Overview
 
-**@xtr-dev/payload-ecommerce** is a PayloadCMS plugin that provides e-commerce functionality including products, orders, carts, categories, and coupons.
+**@xtr-dev/payload-ecommerce** is a PayloadCMS plugin that provides e-commerce collections (products, orders, carts, categories, coupons) and server helpers. It does not process payments or send emails.
 
 ## Tech Stack
 
@@ -32,15 +32,15 @@ pnpm dev:generate-types    # Regenerate Payload types
 - `src/index.ts` - Main plugin factory function `payloadEcommerce()`
 
 ### Collections Created
-- **products** - Product catalog with title, slug, description, price, inventory, images
-- **orders** - Customer orders with items, addresses, status, payment status
-- **carts** - Shopping carts with session tracking and expiration
-- **categories** - Product categories with nesting support
-- **coupons** - Discount codes with percentage/fixed/free-shipping types
+- **products** - Catalog with title, slug (generated when empty), price, variants, images and optional stock tracking. `inventory.lowStockThreshold` is only a field; nothing alerts on it
+- **orders** - Items, addresses, status and payment status fields. The total is always computed (`subtotal − discount + tax + shipping`). Creating an order checks and reduces stock and counts the coupon; moving it to cancelled/refunded puts both back
+- **carts** - For a user or guest session, expiring 30 days after the last change. Expired carts are ignored by the helpers and removed by `deleteExpiredCarts`
+- **categories** - Name, slug (generated when empty) and an optional `parent` relationship (no tree helpers)
+- **coupons** - Percentage, fixed and free-shipping codes, validated and applied when an order is created
 
 ### Exports
-- `.` - Main plugin and collection exports
-- `./client` - Client-side hooks (`useEcommerce`)
+- `.` - Plugin, collections, `useEcommerce(payload)` server helpers and utilities (`calculateOrderTotal`, `deleteExpiredCarts`, `slugify`, `getRelationshipId`, ...)
+- `./client` - React hooks `useCart`, `useProducts`, `useOrders`. They call cart/order endpoints the plugin does not register (only the demo app has them)
 - `./rsc` - React Server Components
 
 ### Configuration Options
@@ -54,23 +54,27 @@ payloadEcommerce({
     carts: 'carts' | CollectionExtender,
     coupons: 'coupons' | CollectionExtender,
   },
-  userCollection: 'users',
-  payments: {
-    providers: ['stripe', 'paypal', 'square'],
-    currency: 'USD',
-    testMode: boolean,
-  },
-  emails: { enabled: boolean, from: string, fromName: string },
-  shipping: { enabled: boolean, freeShippingThreshold: number, rates: [] },
+  // Registers the 'ecommerce-delete-expired-carts' jobs task (not scheduled)
+  cartCleanupTask: boolean,
   hooks: {
     beforeCreateOrder: async (order) => order,
-    afterCreateOrder: async (order) => {},
-    beforePayment: async (order) => {},
-    afterPayment: async (order) => {},
+    afterCreateOrder: async (order) => {}, // throwing here fails the order
     calculateTax: (orderData) => number,
   },
 })
 ```
+
+The option type also lists `userCollection`, `payments`, `emails`, `shipping`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are not implemented: accepted but ignored.
+
+### Where the logic lives
+- `src/lib/totals.ts` - the only place an order total is computed
+- `src/lib/coupons.ts` - coupon rules (`evaluateCoupon`), shared by `validateCoupon` and the Orders hook
+- `src/lib/atomic.ts` - conditional single-statement stock and coupon-usage updates (SQL via the adapter's `execute`, MongoDB via `$inc`), with a non-atomic fallback
+- `src/lib/cartExpiry.ts` - cart lifetime, `deleteExpiredCarts` and the optional jobs task
+- `src/lib/slug.ts` - slug generation hook shared by products and categories
+- `src/collections/Orders.ts` - hooks that apply the coupon, check stock, compute tax and total, take stock, and reverse on cancel/refund
+
+Payload fills `data` with the stored value of fields an update leaves out before collection hooks run; compare with `originalDoc` to detect a change (see Orders and Carts hooks).
 
 ## Key Files
 
@@ -82,12 +86,13 @@ payloadEcommerce({
 | `src/collections/Carts.ts` | Shopping cart collection |
 | `src/collections/Categories.ts` | Product categories |
 | `src/collections/Coupons.ts` | Discount codes |
+| `src/lib/useEcommerce.ts` | Server helpers (`cart`, `orders`, `coupons`, `products`) |
 | `src/exports/client.tsx` | Client-side hooks |
 | `dev/payload.config.ts` | Development configuration |
 
 ## Integration with payload-billing
 
-This plugin works alongside @xtr-dev/payload-billing for payment processing:
+Payments are not part of this plugin. The demo in `dev/` pairs it with @xtr-dev/payload-billing; the host syncs the payment status to the order itself. Setting an order to `cancelled` or `refunded` this way also puts its stock back:
 
 ```typescript
 // Example: Extend payments collection to sync order status
@@ -114,11 +119,6 @@ billingPlugin({
 })
 ```
 
-## Client Hooks
+## Tests
 
-```typescript
-import { useEcommerce } from '@xtr-dev/payload-ecommerce/client'
-
-// Use in React components
-const { cart, products, orders, addToCart, checkout } = useEcommerce()
-```
+Integration tests are in `dev/int.spec.ts` and run against a temporary SQLite database (numeric ids, no transactions). Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.

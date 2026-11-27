@@ -1,6 +1,6 @@
 # Payload eCommerce
 
-> A complete eCommerce plugin for PayloadCMS 3.x
+> Products, carts, orders and coupons for PayloadCMS 3.x, with server-side helpers
 
 [![npm version](https://img.shields.io/npm/v/@xtr-dev/payload-ecommerce.svg)](https://www.npmjs.com/package/@xtr-dev/payload-ecommerce)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -9,13 +9,15 @@
 
 ## Features
 
-- 🛍️ **Products** - Variants, categories, inventory tracking, and SKUs
-- 🛒 **Shopping Cart** - Session-based carts with automatic cleanup
-- 📦 **Orders** - Complete order lifecycle with status tracking
-- 🏷️ **Coupons** - Percentage, fixed amount, and free shipping discounts
-- 📊 **Inventory** - Automatic stock deduction on purchase
-- 💰 **Tax Calculation** - Configurable tax hook with support for tax services
-- 🔧 **Utilities** - Server-side helpers for cart and order management
+- 🛍️ **Products** - Variants, categories, SKUs, generated slugs and optional stock tracking
+- 🛒 **Carts** - For users or guest sessions, with a 30-day sliding expiry and a cleanup helper / optional jobs task
+- 📦 **Orders** - Status and payment status fields, totals computed by the plugin, stock and coupon use restored on cancel or refund
+- 🏷️ **Coupons** - Percentage, fixed amount and free shipping, validated and applied when the order is created
+- 📊 **Inventory** - Stock checked before an order is created and reduced atomically, so concurrent orders cannot oversell
+- 💰 **Tax** - A `calculateTax` hook you implement (fixed rate, per region, or a call to a tax service)
+- 🔧 **Helpers** - `useEcommerce(payload)` for carts, orders, coupons and products on the server
+
+Not included: payment processing, emails and shipping rates. Payments are shown in the demo app with [@xtr-dev/payload-billing](https://github.com/xtr-dev/payload-billing); see [Not implemented yet](#not-implemented-yet).
 
 ## Quick Start
 
@@ -46,36 +48,37 @@ export default buildConfig({
 })
 ```
 
-That's it! The plugin creates all collections automatically.
+The plugin adds the five collections below. Orders and carts relate to a `users` collection, and products to a `media` collection, which your config has to provide.
 
 ## Collections
 
 ### Products
-- Title, slug, description, price, SKU
-- Product variants (size, color, etc.) with individual inventory
-- Categories (hierarchical)
-- Inventory tracking with low-stock alerts
+- Title, slug (generated from the title when empty), description, price, compare-at price, SKU, barcode, images
+- Variants (size, color, etc.), each with an optional price, SKU and own stock number
+- Categories (many per product)
+- Optional stock tracking (`inventory.trackQuantity`, `inventory.quantity`). `inventory.lowStockThreshold` is a plain field for your own use; the plugin sends no low-stock alerts
 - Status: draft | active | archived
 
 ### Orders
-- Order number, items, totals
+- Order number, items, subtotal, discount, tax, shipping and a computed total
 - Shipping and billing addresses
-- Payment tracking
 - Status: pending | processing | shipped | delivered | cancelled | refunded
+- Payment fields (`paymentStatus`, `paymentMethod`, `paymentId`) that your payment integration sets; the plugin takes no payments and sends no emails
+- Moving an order to cancelled or refunded puts its stock and coupon use back
 
 ### Carts
-- Session-based (no login required)
-- Auto-calculated subtotals
-- 30-day expiration
+- For a logged-in user or a guest session id
+- Auto-calculated subtotal
+- Expire 30 days after the last change (see [Carts](#carts-1))
 
 ### Coupons
 - Types: percentage | fixed | freeShipping
-- Usage limits and date ranges
-- Product/category restrictions
+- Total and per-customer usage limits, date range, minimum purchase
+- Product and category restrictions
 
 ### Categories
-- Hierarchical organization
-- Auto-generated slugs
+- Name, slug (generated from the name when empty), description
+- An optional `parent` category. The plugin stores the relationship only; building a tree or breadcrumb from it is up to you
 
 ## Server-Side Usage
 
@@ -126,12 +129,14 @@ const productIds = cart.items.map((item) => getRelationshipId(item.product))
 
 ## Example Implementation
 
-Check the `/dev` directory for a complete Next.js storefront example with:
+The `/dev` directory holds a Next.js storefront built on the plugin:
 - Product browsing and search
-- Shopping cart
-- Checkout flow
-- Order management
-- Payment integration (via @xtr-dev/payload-billing)
+- Shopping cart with coupons
+- Checkout that creates an order from the cart
+- Order pages
+- Payments through @xtr-dev/payload-billing's test provider, wired up in the demo's own code (API routes and a hook that syncs the payment status to the order)
+
+The demo's cart and checkout API routes are part of the demo, not of the plugin.
 
 Run the demo:
 ```bash
@@ -304,6 +309,12 @@ Limits:
 - Two simultaneous cancellations of the same order can both restore its stock.
 
 The helpers `ecommerce.products.checkInventory`, `reduceInventory` (throws when stock is short) and `restoreInventory`, and `ecommerce.coupons.incrementCouponUsage` / `decrementCouponUsage` use the same atomic statements, for stock movements that are not orders. They take an optional `{ req }` as last argument to run inside a transaction.
+
+## Not implemented yet
+
+The plugin's option type also lists `payments`, `emails`, `shipping`, `userCollection`, `disabled` and the `beforePayment` / `afterPayment` hooks. They are accepted but have no effect yet. The options that work are `collections`, `cartCleanupTask` and the hooks `calculateTax`, `beforeCreateOrder` and `afterCreateOrder`.
+
+The `@xtr-dev/payload-ecommerce/client` hooks (`useCart`, `useProducts`, `useOrders`) call cart and order endpoints that the plugin does not register; they only work against routes like the ones in the demo app.
 
 ## Development
 
