@@ -51,10 +51,11 @@ export async function POST(request: Request) {
 
     // Calculate totals
     const subtotal = cart.subtotal || 0;
-    let discount = 0;
-    let discountCouponId: DocumentId | undefined;
+    let couponId: DocumentId | undefined;
 
-    // Validate and apply coupon if provided
+    // Check the coupon first so that an invalid code is ignored instead of failing the
+    // checkout. The plugin validates it again and applies the discount (or free shipping)
+    // when the order is created with the coupon's id.
     if (couponCode) {
       const productIds: DocumentId[] = cart.items
         .map((item: any) => getRelationshipId(item.product))
@@ -67,20 +68,7 @@ export async function POST(request: Request) {
       });
 
       if (couponResult.valid) {
-        discount = couponResult.discount || 0;
-        // Find coupon ID
-        const { docs: coupons } = await payload.find({
-          collection: 'coupons',
-          where: {
-            code: {
-              equals: couponCode,
-            },
-          },
-          limit: 1,
-        });
-        if (coupons.length > 0) {
-          discountCouponId = coupons[0].id;
-        }
+        couponId = couponResult.coupon.id;
       }
     }
 
@@ -99,8 +87,7 @@ export async function POST(request: Request) {
         paymentStatus: 'pending',
         subtotal,
         shipping,
-        discount,
-        coupon: discountCouponId,
+        coupon: couponId,
         status: 'pending',
       },
     });

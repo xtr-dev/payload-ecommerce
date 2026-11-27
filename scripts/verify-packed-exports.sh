@@ -21,9 +21,11 @@ npm_config_cache="$consumer_directory/npm-cache" npm install \
   --legacy-peer-deps \
   "$package_tarball"
 
-# The /client and /rsc entry points import React at runtime. The install above is offline
-# and skips peer dependencies, so the consumer borrows the repository's own copy of React,
-# the same way a host application would provide it.
+# The main entry point imports Payload at runtime (for its error classes) and the /client
+# and /rsc entry points import React. The install above is offline and skips peer
+# dependencies, so the consumer borrows the repository's own copies, the same way a host
+# application would provide them.
+ln -s "$repository_directory/node_modules/payload" node_modules/payload
 ln -s "$repository_directory/node_modules/react" node_modules/react
 
 node --input-type=module --eval '

@@ -103,11 +103,12 @@ const order = await ecommerce.orders.createOrderFromCart({
     shippingAddress: { /* ... */ },
     billingAddress: { /* ... */ },
     paymentMethod: 'credit_card',
-    // ... other fields
+    shipping: 5,
+    couponCode: 'SAVE10', // optional; validated and applied by the plugin
   },
 })
 
-// Validate coupon
+// Preview a coupon (see "Coupons" below)
 const result = await ecommerce.coupons.validateCoupon({
   code: 'SAVE10',
   cartTotal: 100,
@@ -162,6 +163,35 @@ payloadEcommerce({
   },
 })
 ```
+
+## Coupons
+
+A coupon is applied by the plugin when an order is created with it. Pass the coupon's id as `coupon` (or its code as `orderData.couponCode` to `createOrderFromCart`); the orders collection then:
+
+1. Checks the coupon against the order: status `active`, within `validFrom`/`validUntil`, `usageCount` below `usageLimit`, the customer's earlier orders with this coupon below `customerLimit` (only for orders with a `user`), `subtotal` at least `minPurchase`, and at least one order item matching `appliesToProducts` / `appliesToCategories` when those are set. A limit of 0 or an empty restriction means no limit.
+2. Rejects the order with a validation error on `coupon` when a check fails.
+3. Sets `discount` — a percentage of the subtotal (capped by `maxDiscount`) or the fixed amount, never more than the subtotal. A `discount` passed together with a coupon is ignored.
+4. Sets `shipping` to 0 for a `freeShipping` coupon (its `discount` is 0).
+5. Increments the coupon's `usageCount`.
+
+Tax and total are calculated after that, so they include the coupon's effect. Without a coupon, the caller's `discount` is used as is. Changing the coupon of an existing order does not recalculate it.
+
+To show the effect before ordering, use `validateCoupon`, which runs the same checks without using the coupon:
+
+```typescript
+const result = await ecommerce.coupons.validateCoupon({
+  code: 'save10', // matched ignoring case; codes are stored in upper case
+  cartTotal: 100, // subtotal before discount, tax and shipping
+  userId, // optional, for customerLimit
+  productIds, // needed for product-restricted coupons
+  categoryIds, // needed for category-restricted coupons
+})
+// { valid: true, discount: 10, freeShipping: false, coupon }
+// { valid: true, discount: 0, freeShipping: true, coupon }   for a free shipping coupon
+// { valid: false, discount: 0, freeShipping: false, error: 'Coupon has expired' }
+```
+
+A restricted percentage or fixed coupon discounts the whole subtotal once a matching product is in the order, not only the matching lines.
 
 ## Order Totals
 

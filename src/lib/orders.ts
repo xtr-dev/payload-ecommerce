@@ -2,6 +2,7 @@ import type { Payload } from 'payload'
 
 import type { DocumentId } from './relationships.js'
 
+import { createCouponHelpers } from './coupons.js'
 import { getRelationshipId } from './relationships.js'
 
 export interface CreateOrderFromCartParams {
@@ -34,8 +35,12 @@ export interface CreateOrderFromCartParams {
     subtotal?: number
     tax?: number
     shipping?: number
+    /** Manual discount amount. Ignored when a coupon is given: the coupon sets the discount. */
     discount?: number
+    /** Id of the coupon to apply. The order is rejected when the coupon is not valid for it. */
     coupon?: DocumentId
+    /** Code of the coupon to apply, as an alternative to `coupon`. */
+    couponCode?: string
     status?: string
     paymentStatus?: string
   }
@@ -78,6 +83,7 @@ export const createOrderHelpers = (
   ordersSlug = 'orders',
   cartsSlug = 'carts',
   productsSlug = 'products',
+  couponsSlug = 'coupons',
 ) => {
   const createOrderFromCart = async (params: CreateOrderFromCartParams) => {
     const { cartId, orderData } = params
@@ -147,6 +153,19 @@ export const createOrderHelpers = (
     const shipping = orderData?.shipping ?? 0
     const discount = orderData?.discount ?? 0
     const status = orderData?.status || 'pending'
+
+    // The coupon's rules, discount and free shipping are applied by the orders collection
+    // when the order is created; here a code only has to be turned into the coupon's id.
+    let couponId = orderData?.coupon
+    if (couponId === undefined && orderData?.couponCode) {
+      const coupon = await createCouponHelpers(payload, couponsSlug, ordersSlug).findCouponByCode(
+        orderData.couponCode,
+      )
+      if (!coupon) {
+        throw new Error(`Coupon not found: ${orderData.couponCode}`)
+      }
+      couponId = coupon.id
+    }
     const paymentStatus = orderData?.paymentStatus || 'pending'
 
     const order = await payload.create({
@@ -164,7 +183,7 @@ export const createOrderHelpers = (
         notes,
         status,
         paymentStatus,
-        coupon: orderData?.coupon,
+        coupon: couponId,
       },
     })
 

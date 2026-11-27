@@ -176,7 +176,7 @@ export default function CartPage() {
   const subtotal = cart.subtotal || 0;
   const discount = appliedCoupon?.discount || 0;
   const tax = Math.round((subtotal - discount) * 0.1 * 100) / 100;
-  const shipping = subtotal >= 100 ? 0 : 10;
+  const shipping = appliedCoupon?.freeShipping || subtotal >= 100 ? 0 : 10;
   const total = subtotal - discount + tax + shipping;
 
   return (

@@ -13,6 +13,16 @@ export const Coupons: CollectionConfig = {
       required: true,
       unique: true,
       index: true,
+      admin: {
+        description: 'Stored in upper case; customers can enter it in any case',
+      },
+      hooks: {
+        beforeValidate: [
+          // Coupon lookups compare against the upper-cased code a customer typed, so the
+          // stored code has to be upper case too or the coupon could never be found.
+          ({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value),
+        ],
+      },
     },
     {
       name: 'description',
@@ -46,7 +56,7 @@ export const Coupons: CollectionConfig = {
       type: 'number',
       min: 0,
       admin: {
-        description: 'Discount value (percentage or fixed amount)',
+        description: 'Discount value (percentage or fixed amount). Not used for free shipping.',
         condition: (data) => data.type !== 'freeShipping',
       },
     },

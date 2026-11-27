@@ -23,7 +23,7 @@ export const useEcommerce = (payload: Payload, slugs: EcommerceSlugs = {}) => {
   const couponsSlug = slugs.coupons || 'coupons'
 
   const cart = createCartHelpers(payload, cartsSlug)
-  const orders = createOrderHelpers(payload, ordersSlug, cartsSlug, productsSlug)
+  const orders = createOrderHelpers(payload, ordersSlug, cartsSlug, productsSlug, couponsSlug)
   const coupons = createCouponHelpers(payload, couponsSlug, ordersSlug)
   const products = createProductHelpers(payload, productsSlug)
 
