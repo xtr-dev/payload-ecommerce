@@ -75,6 +75,11 @@ export type PayloadEcommerceConfig = {
     afterCreateOrder?: (order: any) => Promise<void>
     beforePayment?: (order: any) => Promise<void>
     afterPayment?: (order: any) => Promise<void>
+    /**
+     * Returns the tax amount of an order. Called for every new order, and for an update
+     * that changes an item, amount or address. When it throws or returns something that is
+     * not a finite number, the create or update fails and nothing is saved.
+     */
     calculateTax?: (orderData: {
       items: Array<{
         product: any

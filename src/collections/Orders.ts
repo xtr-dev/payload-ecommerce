@@ -203,6 +203,19 @@ const orderError = (
   return error
 }
 
+/**
+ * Builds the error that fails an order create or update because its tax could not be
+ * calculated. It is a plain Error, not a ValidationError: the cause is the host's
+ * `calculateTax` hook (for example an unreachable tax service), not something the caller
+ * of the API sent, so the REST API answers 500 and does not show the hook's message to
+ * the customer. The hook's own error is kept as `cause`.
+ */
+const taxError = (operation: 'create' | 'update', reason: string, cause?: unknown): Error =>
+  new Error(
+    `Order was not ${operation === 'create' ? 'created' : 'updated'}: tax could not be calculated (${reason})`,
+    { cause },
+  )
+
 export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionConfig => {
   const productsSlug = config.collections?.products
     ? (typeof config.collections.products === 'string' ? config.collections.products : 'products')
@@ -578,8 +591,14 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
           const changesTaxInput = operation === 'create' || TAX_INPUT_FIELDS.some(isChanged)
 
           if (changesTaxInput && config.hooks?.calculateTax) {
+            // An order must never be stored with a tax amount that was not actually
+            // calculated, so a hook that throws, or returns something that is not an
+            // amount, fails the whole create or update. This hook runs before anything is
+            // written: no order row, stock or coupon use has changed yet, so there is
+            // nothing to undo.
+            let tax: unknown
             try {
-              const tax = await config.hooks.calculateTax({
+              tax = await config.hooks.calculateTax({
                 items: current('items') || [],
                 subtotal: current('subtotal') || 0,
                 discount: current('discount') || 0,
@@ -587,13 +606,17 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
                 shippingAddress: current('shippingAddress'),
                 billingAddress: current('billingAddress'),
               })
-              // A hook that taxes (subtotal − discount) returns a negative amount when the
-              // discount exceeds the subtotal; tax is never negative, so that becomes 0.
-              data.tax = Math.max(0, tax)
             } catch (error) {
-              req.payload.logger.error(`Failed to calculate tax: ${error}`)
-              // Continue without tax calculation if it fails
+              throw taxError(operation, error instanceof Error ? error.message : String(error), error)
             }
+
+            if (typeof tax !== 'number' || !Number.isFinite(tax)) {
+              throw taxError(operation, `the calculateTax hook returned ${String(tax)} instead of a number`)
+            }
+
+            // A hook that taxes (subtotal − discount) returns a negative amount when the
+            // discount exceeds the subtotal; tax is never negative, so that becomes 0.
+            data.tax = Math.max(0, tax)
           }
 
           if (operation === 'create' && config.hooks?.beforeCreateOrder) {

@@ -261,7 +261,7 @@ An order's `total` is always computed by the plugin when the order is saved:
 total = subtotal − discount + tax + shipping
 ```
 
-- `tax` comes from the `calculateTax` hook when one is configured (a negative result is stored as 0). Without the hook it is the `tax` passed by the caller, or 0.
+- `tax` comes from the `calculateTax` hook when one is configured (a negative result is stored as 0). Without the hook it is the `tax` passed by the caller, or 0. A hook that fails makes the order fail (see [Tax Configuration](#tax-configuration)).
 - The total is never negative: a discount larger than the rest of the order gives 0.
 - A `total` passed by the caller is ignored, so it can be left out. On update, tax is recalculated only when the items, `subtotal`, `discount`, `shipping` or an address actually differ from the stored order, and the total only when an amount differs. A status or tracking update, or re-saving an unchanged order in the admin UI, leaves both as they were.
 - `calculateOrderTotal({ subtotal, discount, tax, shipping })` is exported for showing the same total before the order exists (for example on a cart page). It removes floating point noise but does not round to currency minor units.
@@ -314,6 +314,18 @@ calculateTax: async ({ subtotal, discount, shippingAddress }) => {
   return (subtotal - discount) * rate
 }
 ```
+
+### When the hook fails
+
+An order is never saved without the tax the hook was supposed to calculate. When `calculateTax` throws, or returns something that is not a finite number, the create or update fails with:
+
+```
+Order was not created: tax could not be calculated (<the hook's error message>)
+```
+
+(`not updated` for an update.) The hook's own error is on the thrown error's `cause`. Tax is calculated before anything is written, so a failed create leaves no order, takes no stock and counts no coupon use, `createOrderFromCart` leaves the cart as it was, and a failed update changes nothing — a cancellation in that same update does not happen either. The error is a server error (HTTP 500 through the REST API), not a validation error.
+
+Because the hook only runs on an update that changes an item, amount or address, a status or tracking update still works while your tax service is down. If you would rather accept orders without tax in that case, catch the error inside your hook and return a fallback amount.
 
 ## Inventory and Order Side Effects
 
