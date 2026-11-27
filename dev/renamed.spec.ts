@@ -1,7 +1,7 @@
 import type { CollectionConfig, Field, Payload } from 'payload'
 
 import { getPayload } from 'payload'
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
 import {
   DELETE_EXPIRED_CARTS_TASK_SLUG,
@@ -11,6 +11,7 @@ import {
   payloadEcommerce,
   useEcommerce,
 } from '../src/index.js'
+import { adjustCouponUsage, adjustStock, claimOrderRelease } from '../src/lib/atomic.js'
 import config from './payload.renamed.config.js'
 
 /**
@@ -244,6 +245,92 @@ describe('renamed collections', () => {
     await payload.jobs.queue({ input: {}, task: DELETE_EXPIRED_CARTS_TASK_SLUG as never })
     await payload.jobs.run()
     expect(await exists(third.id)).toBe(false)
+  })
+
+  test('the scheduled jobs task is queued by Payload and deletes expired carts', async (context) => {
+    // Task schedules do not exist in the oldest Payload version the plugin supports.
+    if (typeof payload.jobs.handleSchedules !== 'function') {
+      context.skip()
+      return
+    }
+
+    expect(
+      payload.config.jobs.tasks.find((task) => task.slug === DELETE_EXPIRED_CARTS_TASK_SLUG)?.schedule,
+    ).toEqual([{ cron: '* * * * * *', queue: 'cart-cleanup' }])
+
+    const cart = await payload.create({
+      collection: 'baskets',
+      data: { expiresAt: new Date(Date.now() - 1000).toISOString(), items: [], sessionId: 'renamed-scheduled' },
+    })
+    const exists = async () =>
+      (await payload.count({ collection: 'baskets', where: { id: { equals: cart.id } } })).totalDocs === 1
+
+    // Nothing was queued by hand: handleSchedules queues the job for the next second and
+    // run picks it up once that moment has passed.
+    for (let attempt = 0; attempt < 20 && (await exists()); attempt += 1) {
+      await payload.jobs.handleSchedules({ queue: 'cart-cleanup' })
+      await payload.jobs.run({ queue: 'cart-cleanup' })
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+
+    expect(await exists()).toBe(false)
+  })
+
+  test('stock, coupon use and order release are atomic statements on the renamed tables', async () => {
+    const warn = vi.spyOn(payload.logger, 'warn')
+    const update = vi.spyOn(payload, 'update')
+
+    try {
+      const product = await payload.create({
+        collection: 'shop-products',
+        data: {
+          // One more than the tests take: the order created below holds one unit.
+          inventory: { quantity: 6, trackQuantity: true },
+          price: 100,
+          status: 'active',
+          title: 'Renamed Atomic Product',
+          variants: [{ name: 'Large', inventory: 2 }],
+        },
+      })
+      const coupon = await payload.create({
+        collection: 'vouchers',
+        data: { code: 'RENAMEDATOMIC', status: 'active', type: 'fixed', usageLimit: 1, value: 1 },
+      })
+      const order = await payload.create({
+        collection: 'shopOrders',
+        data: {
+          items: [{ price: 100, product: product.id, quantity: 1, total: 100 }],
+          shippingAddress: address,
+          subtotal: 100,
+        },
+      })
+      update.mockClear()
+
+      expect(await adjustStock(payload, { delta: -5, productId: product.id, productsSlug: 'shop-products' })).toBe(true)
+      expect(await adjustStock(payload, { delta: -1, productId: product.id, productsSlug: 'shop-products' })).toBe(false)
+      expect(
+        await adjustStock(payload, { delta: -2, productId: product.id, productsSlug: 'shop-products', variant: 'Large' }),
+      ).toBe(true)
+      expect(await adjustCouponUsage(payload, { couponId: coupon.id, couponsSlug: 'vouchers', delta: 1 })).toBe(true)
+      expect(await adjustCouponUsage(payload, { couponId: coupon.id, couponsSlug: 'vouchers', delta: 1 })).toBe(false)
+      expect(
+        await claimOrderRelease(payload, { flag: 'inventoryReduced', orderId: order.id, ordersSlug: 'shopOrders' }),
+      ).toBe(true)
+      expect(
+        await claimOrderRelease(payload, { flag: 'inventoryReduced', orderId: order.id, ordersSlug: 'shopOrders' }),
+      ).toBe(false)
+
+      // The fallback writes through payload.update and logs a warning; neither happened.
+      expect(update).not.toHaveBeenCalled()
+      expect(warn.mock.calls.filter(([message]) => String(message).includes('No atomic'))).toEqual([])
+
+      const stored = await payload.findByID({ id: product.id, collection: 'shop-products' })
+      expect(stored.inventory.quantity).toBe(0)
+      expect(stored.variants[0].inventory).toBe(0)
+    } finally {
+      warn.mockRestore()
+      update.mockRestore()
+    }
   })
 })
 

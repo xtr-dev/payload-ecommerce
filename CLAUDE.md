@@ -8,7 +8,7 @@ This file provides guidance to Claude Code when working in the @xtr-dev/payload-
 
 ## Tech Stack
 
-- **Framework**: PayloadCMS 3.37.0 plugin
+- **Framework**: PayloadCMS plugin, peer range `^3.37.0`. The dev environment and lockfile use Payload 3.94.2 / Next 16 / vitest 4; the CI job "Test (oldest supported Payload)" reinstalls 3.37.0 and runs both suites, so do not use a Payload API newer than 3.37 without a guard (see the schedule test in `dev/renamed.spec.ts`)
 - **Build**: SWC for fast transpilation
 - **Package Manager**: pnpm
 - **Dependencies**: none at runtime. @xtr-dev/payload-billing is a dev dependency used by the demo in `dev/` (payment integration)
@@ -60,8 +60,8 @@ payloadEcommerce({
   roundMoney: (amount) => number, // default: two decimals
   // Who manages the shop; default: user.role === 'admin' or user.roles includes 'admin'
   isAdmin: ({ req }) => boolean,
-  // Registers the 'ecommerce-delete-expired-carts' jobs task (not scheduled)
-  cartCleanupTask: boolean,
+  // Registers the 'ecommerce-delete-expired-carts' jobs task; { schedule } lets Payload queue it
+  cartCleanupTask: boolean | { schedule: [{ cron, queue }] },
   hooks: {
     beforeCreateOrder: async (order) => order,
     afterCreateOrder: async (order) => {}, // throwing here fails the order
@@ -85,7 +85,7 @@ No collection slug is hardcoded. The collections are factories (`createProducts(
 - `src/lib/ids.ts` - `toDocumentId`: every helper converts incoming ids to the collection's id type (numeric strings on SQL)
 - `src/lib/totals.ts` - the only place an order total is computed
 - `src/lib/coupons.ts` - coupon rules (`evaluateCoupon`), shared by `validateCoupon` and the Orders hook
-- `src/lib/atomic.ts` - conditional single-statement stock and coupon-usage updates (SQL via the adapter's `execute`, MongoDB via `$inc`), with a non-atomic fallback
+- `src/lib/atomic.ts` - conditional single-statement stock and coupon-usage updates (SQL via the adapter's `execute`, MongoDB via `$inc`), with a non-atomic fallback that logs a one-time warning. The "atomic updates" tests in `dev/int.spec.ts` fail when the fallback is taken
 - `src/lib/cartExpiry.ts` - cart lifetime, `deleteExpiredCarts` and the optional jobs task
 - `src/lib/slug.ts` - slug generation hook shared by products and categories
 - `src/collections/Orders.ts` - hooks that apply the coupon, check stock, compute tax and total, take stock, and reverse on cancel/refund

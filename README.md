@@ -27,6 +27,8 @@ Not included: payment processing, emails and shipping rates. Payments are shown 
 pnpm add @xtr-dev/payload-ecommerce
 ```
 
+Requires `payload` `^3.37.0`. The plugin is developed and tested on Payload 3.94 (Next.js 16), and CI also runs the tests on 3.37, with SQLite and MongoDB.
+
 ### Add to Payload Config
 
 ```typescript
@@ -52,7 +54,7 @@ The plugin adds the five collections below. Orders and carts relate to your user
 | `mediaCollection` | `'media'` | Upload collection product `images` relate to |
 | `isAdmin` | `role === 'admin'` or `roles` includes `'admin'` | Who manages the shop (see [Access control](#access-control)) |
 | `roundMoney` | two decimals | Rounds the discount, tax and total the plugin calculates; pass `Math.round` for integer cents (see [Money](#money)) |
-| `cartCleanupTask` | `false` | Registers the jobs task that deletes expired carts (see [Carts](#carts-1)) |
+| `cartCleanupTask` | `false` | `true` registers the jobs task that deletes expired carts; `{ schedule }` also schedules it (see [Carts](#carts-1)) |
 | `hooks.calculateTax` | – | Returns the tax of an order (see [Tax Configuration](#tax-configuration)) |
 | `hooks.beforeCreateOrder` | – | Receives and returns the data of a new order, after coupon and tax and before the total is computed |
 | `hooks.afterCreateOrder` | – | Runs after a new order took its stock; throwing fails the order |
@@ -321,7 +323,14 @@ payloadEcommerce({ cartCleanupTask: true })
 await payload.jobs.queue({ task: 'ecommerce-delete-expired-carts', input: {} })
 ```
 
-The task is only registered, not scheduled, and it runs when your jobs runner processes the queue (`jobs.autoRun`, `payload jobs:run` or `payload.jobs.run()`).
+```typescript
+// Or let Payload queue the task on a schedule (needs a Payload version with task schedules)
+payloadEcommerce({
+  cartCleanupTask: { schedule: [{ cron: '0 3 * * *', queue: 'nightly' }] },
+})
+```
+
+With `true` the task is only registered, not scheduled. With a `schedule` Payload queues it at those times, provided your jobs runner handles schedules for that queue (`jobs.autoRun`, or `payload.jobs.handleSchedules()` from your own cron). Either way it runs when your jobs runner processes the queue (`jobs.autoRun`, `payload jobs:run` or `payload.jobs.run()`). Task schedules are a feature of newer Payload releases (verified with 3.94); on a Payload version without them the `schedule` is ignored.
 
 ## Coupons
 
@@ -444,7 +453,7 @@ The order records what it holds in two read-only fields, `inventoryReduced` and 
 
 Limits:
 
-- The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock, coupon usage or order flag columns have custom database names, the plugin falls back to read-then-write, which can oversell or restore twice under concurrency.
+- The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock, coupon usage or order flag columns have custom database names, the plugin falls back to read-then-write, which can oversell or restore twice under concurrency. It logs a warning the first time that happens (`[payload-ecommerce] No atomic … update …`), because the statements use parts of the adapters that are not public API. The plugin's tests assert that the atomic statements are used on SQLite and MongoDB on Payload 3.37 and 3.94; if you see the warning after a Payload upgrade, please open an issue.
 - On MongoDB, concurrent orders in transactions that touch the same product can fail with MongoDB's transient "write conflict" error even when enough stock is left. Nothing is oversold; retry the order.
 - Simultaneous updates of the same order are otherwise handled by Payload and the database, not by the plugin: without transactions (the SQLite adapter's default) Payload can reject all but one of them, and an edit that was read before a cancellation and written after it can put the old status back. In both cases the order's stock and coupon use are still given back at most once, and an order left open that way still holds them.
 

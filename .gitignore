@@ -55,3 +55,6 @@ yarn-error.log*
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Rewritten by every `next dev` / `next build` (imports generated route types from .next/)
+/dev/next-env.d.ts

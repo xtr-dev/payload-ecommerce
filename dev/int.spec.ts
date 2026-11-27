@@ -6,6 +6,7 @@ import { getPayload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
 import { createOrders as createOrdersCollection } from '../src/collections/Orders.js'
+import { adjustCouponUsage, adjustStock, claimOrderRelease } from '../src/lib/atomic.js'
 import { DEFAULT_ECOMMERCE_SLUGS } from '../src/lib/slugs.js'
 import {
   calculateOrderTotal,
@@ -2637,6 +2638,175 @@ describe('Ecommerce Plugin integration tests', () => {
           orderData: { customerEmail: 'not an email', shippingAddress: addressWithoutStateOrPostalCode },
         }),
       ).rejects.toThrow(/invalid/i)
+    })
+  })
+
+  // The atomic statements use parts of the database adapters that are not public API
+  // (Drizzle's `execute` and table map, the Mongoose models and sessions). When a Payload
+  // release changes them the plugin falls back to read-then-write, and every other test
+  // would still pass, because the fallback is correct without concurrency. These tests
+  // fail instead.
+  describe('atomic updates', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+    }
+
+    const fallbackWarnings = (warn: { mock: { calls: unknown[][] } }) =>
+      warn.mock.calls.map(([message]) => String(message)).filter((message) => message.includes('No atomic'))
+
+    const createFixtures = async (label: string) => {
+      const run = `${label}-${Date.now()}`
+      const product = await payload.create({
+        collection: 'products',
+        data: {
+          // One more than the tests take: the order created below holds one unit.
+          inventory: { quantity: 6, trackQuantity: true },
+          price: 10,
+          status: 'active',
+          title: `Atomic Product ${run}`,
+          variants: [{ name: 'Large', inventory: 2 }],
+        },
+      })
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: `ATOMIC${run}`, status: 'active', type: 'fixed', usageLimit: 1, value: 1 },
+      })
+      const order = await payload.create({
+        collection: 'orders',
+        data: {
+          items: [{ price: 10, product: product.id, quantity: 1, total: 10 }],
+          shippingAddress: address,
+          subtotal: 10,
+        },
+      })
+
+      return { coupon, order, product }
+    }
+
+    /** Spies on the adapter's own statement entry point: `execute` on SQL, the model's `updateOne` on MongoDB. */
+    const spyOnNativeStatements = () => {
+      const db = payload.db as any
+      return usesMongoDB
+        ? ['products', 'coupons', 'orders'].map((slug) => vi.spyOn(db.collections[slug], 'updateOne'))
+        : [vi.spyOn(db, 'execute')]
+    }
+
+    test(`stock, coupon use and order release each run as one ${usesMongoDB ? 'MongoDB updateOne' : 'SQL statement'}, not as the fallback`, async () => {
+      const { coupon, order, product } = await createFixtures('native')
+
+      const warn = vi.spyOn(payload.logger, 'warn')
+      const update = vi.spyOn(payload, 'update')
+      const dbUpdateOne = vi.spyOn(payload.db, 'updateOne')
+      const native = spyOnNativeStatements()
+      const nativeCalls = () => native.reduce((sum, spy) => sum + spy.mock.calls.length, 0)
+
+      try {
+        expect(await adjustStock(payload, { delta: -5, productId: product.id, productsSlug: 'products' })).toBe(true)
+        expect(nativeCalls()).toBe(1)
+        // Fewer units left than asked for: refused by the same single statement.
+        expect(await adjustStock(payload, { delta: -1, productId: product.id, productsSlug: 'products' })).toBe(false)
+        expect(nativeCalls()).toBe(2)
+
+        expect(
+          await adjustStock(payload, { delta: -2, productId: product.id, productsSlug: 'products', variant: 'Large' }),
+        ).toBe(true)
+        expect(nativeCalls()).toBe(3)
+
+        expect(await adjustCouponUsage(payload, { couponId: coupon.id, couponsSlug: 'coupons', delta: 1 })).toBe(true)
+        expect(nativeCalls()).toBe(4)
+        expect(await adjustCouponUsage(payload, { couponId: coupon.id, couponsSlug: 'coupons', delta: 1 })).toBe(false)
+
+        const beforeClaim = nativeCalls()
+        expect(
+          await claimOrderRelease(payload, { flag: 'inventoryReduced', orderId: order.id, ordersSlug: 'orders' }),
+        ).toBe(true)
+        expect(nativeCalls()).toBe(beforeClaim + 1)
+        expect(
+          await claimOrderRelease(payload, { flag: 'inventoryReduced', orderId: order.id, ordersSlug: 'orders' }),
+        ).toBe(false)
+
+        // The fallback reads and writes through Payload and logs a warning. None of that happened.
+        expect(update).not.toHaveBeenCalled()
+        expect(dbUpdateOne).not.toHaveBeenCalled()
+        expect(fallbackWarnings(warn)).toEqual([])
+      } finally {
+        for (const spy of [warn, update, dbUpdateOne, ...native]) {
+          spy.mockRestore()
+        }
+      }
+
+      const stored = await payload.findByID({ id: product.id, collection: 'products' })
+      expect(stored.inventory.quantity).toBe(0)
+      expect(stored.variants[0].inventory).toBe(0)
+      expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(1)
+      expect((await payload.findByID({ id: order.id, collection: 'orders' })).inventoryReduced).toBe(false)
+    })
+
+    test('an order holds its stock and coupon through the atomic statements', async () => {
+      const { coupon, product } = await createFixtures('order')
+      const warn = vi.spyOn(payload.logger, 'warn')
+      const native = spyOnNativeStatements()
+
+      try {
+        const order = await payload.create({
+          collection: 'orders',
+          data: {
+            coupon: coupon.id,
+            items: [{ price: 10, product: product.id, quantity: 2, total: 20 }],
+            shippingAddress: address,
+            subtotal: 20,
+          },
+        })
+        await payload.update({ id: order.id, collection: 'orders', data: { status: 'cancelled' } })
+
+        // Take stock, count the coupon, then on cancel: claim both flags, restore stock, give the coupon back.
+        expect(native.reduce((sum, spy) => sum + spy.mock.calls.length, 0)).toBeGreaterThanOrEqual(6)
+        expect(fallbackWarnings(warn)).toEqual([])
+      } finally {
+        for (const spy of [warn, ...native]) {
+          spy.mockRestore()
+        }
+      }
+    })
+
+    test('without the adapter internals the fallback is used and says so once', async () => {
+      const { product } = await createFixtures('fallback')
+      const db = payload.db as any
+      const warn = vi.spyOn(payload.logger, 'warn')
+
+      // Makes the adapter look like one the plugin has no statement for: an unknown
+      // adapter name on MongoDB, a missing `execute` on SQL.
+      const original = usesMongoDB ? db.name : db.execute
+      if (usesMongoDB) {
+        db.name = 'unsupported-adapter'
+      } else {
+        db.execute = undefined
+      }
+
+      try {
+        expect(await adjustStock(payload, { delta: -2, productId: product.id, productsSlug: 'products' })).toBe(true)
+        expect(await adjustStock(payload, { delta: -2, productId: product.id, productsSlug: 'products' })).toBe(true)
+        expect(await adjustStock(payload, { delta: -2, productId: product.id, productsSlug: 'products' })).toBe(false)
+
+        const warnings = fallbackWarnings(warn)
+        expect(warnings).toHaveLength(1)
+        expect(warnings[0]).toContain('No atomic stock update for collection "products"')
+        expect(warnings[0]).toContain('read-then-write')
+      } finally {
+        if (usesMongoDB) {
+          db.name = original
+        } else {
+          db.execute = original
+        }
+        warn.mockRestore()
+      }
+
+      const stored = await payload.findByID({ id: product.id, collection: 'products' })
+      expect(stored.inventory.quantity).toBe(1)
     })
   })
 })
