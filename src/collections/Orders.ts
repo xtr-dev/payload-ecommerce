@@ -3,6 +3,23 @@ import type { PayloadEcommerceConfig } from '../index.js'
 import { createProductHelpers } from '../lib/products.js'
 import { createCouponHelpers } from '../lib/coupons.js'
 import { getRelationshipId } from '../lib/relationships.js'
+import { calculateOrderTotal } from '../lib/totals.js'
+
+/**
+ * Order fields that are passed to the `calculateTax` hook. A change to any of them can
+ * change the tax amount.
+ */
+const TAX_INPUT_FIELDS = [
+  'items',
+  'subtotal',
+  'discount',
+  'shipping',
+  'shippingAddress',
+  'billingAddress',
+]
+
+/** Order fields whose change requires `total` to be computed again. */
+const TOTAL_INPUT_FIELDS = ['subtotal', 'discount', 'tax', 'shipping', 'total']
 
 const addressFields = [
   {
@@ -152,6 +169,10 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
       type: 'number',
       required: true,
       min: 0,
+      admin: {
+        description: 'Calculated on save: subtotal − discount + tax + shipping',
+        readOnly: true,
+      },
     },
     {
       name: 'status',
@@ -266,7 +287,7 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
   ],
     hooks: {
       beforeChange: [
-        async ({ data, operation, req }) => {
+        async ({ data, operation, originalDoc, req }) => {
           if (operation === 'create' && !data.orderNumber) {
             const timestamp = Date.now()
             const random = Math.floor(Math.random() * 1000)
@@ -275,21 +296,30 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
             data.orderNumber = `ORD-${timestamp}-${random}`
           }
 
-          // Calculate tax if hook is provided
-          if ((operation === 'create' || operation === 'update') && config.hooks?.calculateTax) {
-            try {
-              const taxAmount = await config.hooks.calculateTax({
-                items: data.items || [],
-                subtotal: data.subtotal || 0,
-                discount: data.discount || 0,
-                shipping: data.shipping || 0,
-                shippingAddress: data.shippingAddress,
-                billingAddress: data.billingAddress,
-              })
-              data.tax = taxAmount
+          // On update `data` holds only the fields being changed, so every amount that is
+          // not part of this change is read from the stored order instead of counting as 0.
+          const stored: Record<string, unknown> = operation === 'update' ? (originalDoc ?? {}) : {}
+          const current = (field: string) => (field in data ? data[field] : stored[field])
 
-              // Recalculate total
-              data.total = (data.subtotal || 0) - (data.discount || 0) + (data.tax || 0) + (data.shipping || 0)
+          // Tax depends on the items, amounts and addresses. It is calculated for every new
+          // order, and for an update only when one of those inputs is part of the change, so
+          // that a status or tracking update does not re-tax an existing order.
+          const changesTaxInput =
+            operation === 'create' || TAX_INPUT_FIELDS.some((field) => field in data)
+
+          if (changesTaxInput && config.hooks?.calculateTax) {
+            try {
+              const tax = await config.hooks.calculateTax({
+                items: current('items') || [],
+                subtotal: current('subtotal') || 0,
+                discount: current('discount') || 0,
+                shipping: current('shipping') || 0,
+                shippingAddress: current('shippingAddress'),
+                billingAddress: current('billingAddress'),
+              })
+              // A hook that taxes (subtotal − discount) returns a negative amount when the
+              // discount exceeds the subtotal; tax is never negative, so that becomes 0.
+              data.tax = Math.max(0, tax)
             } catch (error) {
               req.payload.logger.error(`Failed to calculate tax: ${error}`)
               // Continue without tax calculation if it fails
@@ -298,6 +328,20 @@ export const createOrders = (config: PayloadEcommerceConfig = {}): CollectionCon
 
           if (operation === 'create' && config.hooks?.beforeCreateOrder) {
             data = await config.hooks.beforeCreateOrder(data)
+          }
+
+          // The total always follows from its parts; a `total` passed by the caller is
+          // replaced. This runs before field validation, so callers do not have to pass the
+          // required `total` at all, and after beforeCreateOrder so amounts changed by that
+          // hook count. On update it runs only when an amount (or the total itself) is part
+          // of the change.
+          if (operation === 'create' || TOTAL_INPUT_FIELDS.some((field) => field in data)) {
+            data.total = calculateOrderTotal({
+              subtotal: current('subtotal'),
+              discount: current('discount'),
+              tax: current('tax'),
+              shipping: current('shipping'),
+            })
           }
 
           return data

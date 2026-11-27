@@ -35,7 +35,6 @@ export interface CreateOrderFromCartParams {
     tax?: number
     shipping?: number
     discount?: number
-    total?: number
     coupon?: DocumentId
     status?: string
     paymentStatus?: string
@@ -147,7 +146,6 @@ export const createOrderHelpers = (
     const tax = orderData?.tax ?? 0
     const shipping = orderData?.shipping ?? 0
     const discount = orderData?.discount ?? 0
-    const total = orderData?.total ?? subtotal
     const status = orderData?.status || 'pending'
     const paymentStatus = orderData?.paymentStatus || 'pending'
 
@@ -160,7 +158,6 @@ export const createOrderHelpers = (
         tax,
         shipping,
         discount,
-        total,
         shippingAddress,
         billingAddress: billingAddress || shippingAddress,
         paymentMethod,

@@ -4,7 +4,8 @@ import config from '@payload-config'
 import { getPayload } from 'payload'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 
-import { useEcommerce } from '../src/index.js'
+import { createOrders } from '../src/collections/Orders.js'
+import { calculateOrderTotal, useEcommerce } from '../src/index.js'
 
 let payload: Payload
 
@@ -118,6 +119,185 @@ describe('Ecommerce Plugin integration tests', () => {
 
     expect(payment.providerId).toBeTruthy()
     expect(payment.status).toBe('pending')
+  })
+
+  // The dev config's calculateTax hook charges 10% of (subtotal − discount), so the
+  // expected totals below include that tax.
+  describe('order totals', () => {
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+      postalCode: '1000 AA',
+      state: 'NH',
+    }
+
+    const createProduct = async (title: string, price: number) =>
+      await payload.create({
+        collection: 'products',
+        data: { price, status: 'active', title },
+      })
+
+    test('calculateOrderTotal adds tax and shipping, subtracts the discount and never goes below zero', () => {
+      expect(calculateOrderTotal({ discount: 5, shipping: 4, subtotal: 50, tax: 4.5 })).toBe(53.5)
+      expect(calculateOrderTotal({ subtotal: 50 })).toBe(50)
+      expect(calculateOrderTotal({ discount: 80, shipping: 5, subtotal: 50 })).toBe(0)
+      // 0.1 + 0.2 is 0.30000000000000004 in floating point.
+      expect(calculateOrderTotal({ shipping: 0.2, subtotal: 0.1 })).toBe(0.3)
+      expect(calculateOrderTotal({ discount: null, subtotal: 10, tax: undefined })).toBe(10)
+    })
+
+    test('an order created without a total gets subtotal − discount + tax + shipping', async () => {
+      const product = await createProduct('Totals Direct Product', 20)
+
+      const order = await payload.create({
+        collection: 'orders',
+        data: {
+          billingAddress: address,
+          discount: 10,
+          items: [{ price: 20, product: product.id, quantity: 3, total: 60 }],
+          shipping: 7.5,
+          shippingAddress: address,
+          subtotal: 60,
+        },
+      })
+
+      expect(order.tax).toBe(5)
+      expect(order.total).toBe(62.5)
+    })
+
+    test('a total passed by the caller is replaced by the computed total', async () => {
+      const product = await createProduct('Totals Override Product', 20)
+
+      const order = await payload.create({
+        collection: 'orders',
+        data: {
+          billingAddress: address,
+          items: [{ price: 20, product: product.id, quantity: 1, total: 20 }],
+          shipping: 5,
+          shippingAddress: address,
+          subtotal: 20,
+          total: 999,
+        },
+      })
+
+      expect(order.total).toBe(27)
+    })
+
+    test('a discount larger than the order gives a total of zero, not a negative one', async () => {
+      const product = await createProduct('Totals Negative Product', 10)
+
+      const order = await payload.create({
+        collection: 'orders',
+        data: {
+          billingAddress: address,
+          discount: 50,
+          items: [{ price: 10, product: product.id, quantity: 1, total: 10 }],
+          shippingAddress: address,
+          subtotal: 10,
+        },
+      })
+
+      expect(order.total).toBe(0)
+    })
+
+    test('createOrderFromCart includes shipping, discount and tax in the total', async () => {
+      const ecommerce = useEcommerce(payload)
+      const product = await createProduct('Totals Cart Product', 25)
+
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 2,
+        sessionId: 'totals-cart-session',
+      })
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: { discount: 10, shipping: 6, shippingAddress: address },
+      })
+
+      expect(order.subtotal).toBe(50)
+      expect(order.tax).toBe(4)
+      expect(order.total).toBe(50)
+    })
+
+    test('updating an order recomputes the total only when an amount changes', async () => {
+      const product = await createProduct('Totals Update Product', 40)
+
+      const order = await payload.create({
+        collection: 'orders',
+        data: {
+          billingAddress: address,
+          items: [{ price: 40, product: product.id, quantity: 1, total: 40 }],
+          shipping: 5,
+          shippingAddress: address,
+          subtotal: 40,
+        },
+      })
+      expect(order.total).toBe(49)
+
+      // A status change carries no amounts; the stored tax and total must survive it.
+      const shipped = await payload.update({
+        id: order.id,
+        collection: 'orders',
+        data: { status: 'shipped' },
+      })
+      expect(shipped.tax).toBe(4)
+      expect(shipped.total).toBe(49)
+
+      const reshipped = await payload.update({
+        id: order.id,
+        collection: 'orders',
+        data: { shipping: 12 },
+      })
+      expect(reshipped.total).toBe(56)
+
+      const overridden = await payload.update({
+        id: order.id,
+        collection: 'orders',
+        data: { total: 1 },
+      })
+      expect(overridden.total).toBe(56)
+    })
+
+    // The dev config always has a calculateTax hook, so the behaviour without one is
+    // checked by running the hooks of an orders collection built without plugin options.
+    test('without a calculateTax hook the total still includes shipping and discount', async () => {
+      const orders = createOrders()
+      const beforeChange = orders.hooks?.beforeChange?.[0]
+      expect(beforeChange).toBeDefined()
+
+      const created = await beforeChange!({
+        collection: payload.collections.orders.config,
+        context: {},
+        data: { discount: 5, shipping: 8, subtotal: 30, total: 30 },
+        operation: 'create',
+        req: { payload } as never,
+      })
+      expect(created.tax).toBeUndefined()
+      expect(created.total).toBe(33)
+
+      const withCallerTax = await beforeChange!({
+        collection: payload.collections.orders.config,
+        context: {},
+        data: { shipping: 8, subtotal: 30, tax: 3 },
+        operation: 'create',
+        req: { payload } as never,
+      })
+      expect(withCallerTax.total).toBe(41)
+
+      const updated = await beforeChange!({
+        collection: payload.collections.orders.config,
+        context: {},
+        data: { shipping: 10 },
+        operation: 'update',
+        originalDoc: { discount: 5, shipping: 8, subtotal: 30, tax: 0, total: 33 },
+        req: { payload } as never,
+      })
+      expect(updated.total).toBe(35)
+    })
   })
 
   // The tests below run on SQLite, where document ids are numbers. The plugin used to
