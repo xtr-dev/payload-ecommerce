@@ -1,6 +1,7 @@
 import type { Payload, PayloadRequest } from 'payload'
 
 import type { HelperAccessOptions } from './access.js'
+import type { EcommerceDocument, EcommerceDocumentTypes, UntypedDocument } from './documents.js'
 import type { DocumentId } from './relationships.js'
 import type { EcommerceSlugs } from './slugs.js'
 
@@ -51,33 +52,58 @@ export type CouponRefusalReason =
   | 'not_yet_valid'
   | 'usage_limit'
 
-export interface ApplyCouponResult {
-  valid: boolean
+/**
+ * What a coupon does to a cart, or why it is refused. `valid` tells the two apart, and
+ * narrows the type: an accepted coupon always has `coupon`, a refusal always has `reason`.
+ *
+ * `TCoupon` is the type of a coupon document. It defaults to the type the host's
+ * generated Payload types give the `coupons` collection.
+ */
+export type ApplyCouponResult<TCoupon = EcommerceDocument<EcommerceDocumentTypes, 'coupons'>> =
+  | AcceptedCouponResult<TCoupon>
+  | RefusedCouponResult<TCoupon>
+
+export interface AcceptedCouponResult<TCoupon = UntypedDocument> {
+  valid: true
   /**
    * Amount to take off the subtotal, rounded with the plugin's `roundMoney` option (two
    * decimals by default). Never more than `cartTotal`, and 0 for a free
    * shipping coupon, whose effect is reported by `freeShipping` instead.
    */
   discount: number
-  /** True when the coupon is valid and of type `freeShipping`: the order ships for 0. */
+  /** True when the coupon is of type `freeShipping`: the order ships for 0. */
+  freeShipping: boolean
+  /** The coupon document. */
+  coupon: TCoupon
+  // The refusal fields are declared as absent, so code that reads them without checking
+  // `valid` first still compiles.
+  error?: undefined
+  reason?: undefined
+  minPurchase?: undefined
+}
+
+export interface RefusedCouponResult<TCoupon = UntypedDocument> {
+  valid: false
+  /** Always 0. */
+  discount: number
+  /** Always false. */
   freeShipping: boolean
   /**
    * English description of the refusal, for logs. To show a customer a message, word it
    * from `reason`.
    */
-  error?: string
-  /** Set exactly when `valid` is false. */
-  reason?: CouponRefusalReason
+  error: string
+  reason: CouponRefusalReason
   /**
    * The coupon's minimum subtotal, as stored (in the shop's money unit). Only set when
    * `reason` is `min_purchase`, so a message can name the amount in the shop's own format.
    */
   minPurchase?: number
   /**
-   * The coupon document. Set when the coupon is valid, and on a refusal for every reason
-   * except `not_found`, so a refusal can be worded without looking the coupon up again.
+   * The coupon document, for every reason except `not_found`, so a refusal can be worded
+   * without looking the coupon up again.
    */
-  coupon?: any
+  coupon?: TCoupon
 }
 
 export interface EvaluateCouponParams extends Omit<ValidateCouponParams, 'code'> {
@@ -95,8 +121,8 @@ export const RELEASED_ORDER_STATUSES = ['cancelled', 'refunded']
 const rejected = (
   reason: CouponRefusalReason,
   error: string,
-  details: Pick<ApplyCouponResult, 'coupon' | 'minPurchase'> = {},
-): ApplyCouponResult => ({
+  details: Pick<RefusedCouponResult<any>, 'coupon' | 'minPurchase'> = {},
+): RefusedCouponResult<any> => ({
   valid: false,
   discount: 0,
   freeShipping: false,
@@ -137,7 +163,7 @@ export const evaluateCoupon = async (
     ordersSlug = 'orders',
     req,
   }: EvaluateCouponParams,
-): Promise<ApplyCouponResult> => {
+): Promise<ApplyCouponResult<any>> => {
   if (!coupon) {
     return rejected('not_found', 'Coupon not found')
   }
@@ -246,11 +272,45 @@ export const evaluateCoupon = async (
   return { valid: true, discount, freeShipping: false, coupon }
 }
 
-export const createCouponHelpers = (
+/** The helpers of `getEcommerce(payload).coupons`. `TCoupon` is the type of a coupon document. */
+export interface CouponHelpers<TCoupon = UntypedDocument> {
+  /** `validateCoupon` with positional arguments. */
+  applyCoupon: (
+    code: string,
+    cartTotal: number,
+    userId?: DocumentId,
+    productIds?: DocumentId[],
+    categoryIds?: DocumentId[],
+  ) => Promise<ApplyCouponResult<TCoupon>>
+  /**
+   * Gives back one use of a coupon (never below 0) and returns the coupon. The orders
+   * collection calls this when an order with a coupon is cancelled or refunded.
+   */
+  decrementCouponUsage: (id: DocumentId, options?: { req?: PayloadRequest }) => Promise<TCoupon>
+  /**
+   * Finds a coupon by its code, or returns null when no coupon has it. Codes are stored
+   * in upper case and matched ignoring case.
+   */
+  findCouponByCode: (code: string) => Promise<null | TCoupon>
+  /**
+   * Counts one use of a coupon in a single atomic step and returns the coupon. Throws
+   * when the coupon's `usageLimit` is already reached or the coupon does not exist. The
+   * orders collection calls this for every order created with a coupon, so call it
+   * yourself only for uses that are not orders.
+   */
+  incrementCouponUsage: (id: DocumentId, options?: { req?: PayloadRequest }) => Promise<TCoupon>
+  /**
+   * Previews a coupon for a cart without using it. Creating an order with the returned
+   * `coupon.id` applies the same rules again.
+   */
+  validateCoupon: (params: ValidateCouponParams) => Promise<ApplyCouponResult<TCoupon>>
+}
+
+export const createCouponHelpers = <TCoupon = UntypedDocument>(
   payload: Payload,
   slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
-) => {
+): CouponHelpers<TCoupon> => {
   const couponsSlug = slugs.coupons
   const ordersSlug = slugs.orders
   // Coupons are readable by admins only, and these helpers are how everyone else gets a
@@ -258,7 +318,7 @@ export const createCouponHelpers = (
   const { trusted } = resolveLocalApiAccess(accessOptions)
 
   /** Finds a coupon by its code. Codes are stored in upper case and matched ignoring case. */
-  const findCouponByCode = async (code: string) => {
+  const findCouponByCode = async (code: string): Promise<null | UntypedDocument> => {
     const { docs } = await payload.find({
       ...trusted,
       collection: couponsSlug,
@@ -281,7 +341,7 @@ export const createCouponHelpers = (
   const validateCoupon = async ({
     code,
     ...params
-  }: ValidateCouponParams): Promise<ApplyCouponResult> => {
+  }: ValidateCouponParams): Promise<ApplyCouponResult<any>> => {
     const coupon = await findCouponByCode(code)
 
     return await evaluateCoupon(payload, coupon, {
@@ -348,11 +408,16 @@ export const createCouponHelpers = (
     })
   }
 
-  return {
+  const helpers: CouponHelpers = {
     findCouponByCode,
     validateCoupon,
     applyCoupon,
     incrementCouponUsage,
     decrementCouponUsage,
   }
+
+  // The Local API only knows the coupons slug as a string, so it returns untyped documents.
+  // The object above is checked against the helper signatures with that untyped
+  // document; which document type the collection really has is the caller's word.
+  return helpers as unknown as CouponHelpers<TCoupon>
 }

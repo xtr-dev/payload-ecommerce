@@ -45,7 +45,8 @@
     "test:int": "vitest",
     "test:mongo": "cross-env DATABASE_ADAPTER=mongodb vitest run",
     "test:pack": "pnpm build && sh scripts/verify-packed-exports.sh",
-    "typecheck": "tsc --noEmit"
+    "test:types": "pnpm build:types && tsc -p dev/type-tests/default-slugs && tsc -p dev/type-tests/renamed-slugs",
+    "typecheck": "tsc --noEmit && pnpm test:types"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
