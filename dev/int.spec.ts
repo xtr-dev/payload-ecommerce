@@ -662,9 +662,75 @@ describe('Ecommerce Plugin integration tests', () => {
         data: { errors: [{ message: expect.stringContaining('Customer usage limit') }] },
       })
 
-      // An order without a customer is not held to the per-customer limit.
-      const guest = await createOrderWith(product, { coupon: coupon.id })
-      expect(guest.discount).toBe(5)
+      // The limit cannot be counted for an order without a customer, so the coupon is
+      // refused instead of being unlimited for guests.
+      await expect(createOrderWith(product, { coupon: coupon.id })).rejects.toMatchObject({
+        data: { errors: [{ message: expect.stringContaining('signed-in customer'), path: 'coupon' }] },
+      })
+    })
+
+    test('validateCoupon names the reason of every refusal and returns the refused coupon', async () => {
+      const ecommerce = getEcommerce(payload)
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      const product = await createProduct('Refusal Reason Product', 50)
+      const category = await payload.create({ collection: 'categories', data: { name: 'Refusal Reason Category' } })
+      const user = await payload.create({
+        collection: 'users',
+        data: { email: 'refusal-reason@example.com', password: 'refusal-reason-password' },
+      })
+
+      const createCoupon = async (code: string, extra: Record<string, unknown>) =>
+        await payload.create({
+          collection: 'coupons',
+          data: { code, status: 'active', type: 'fixed', value: 5, ...extra },
+        })
+
+      const refusals: Array<[string, Record<string, unknown>]> = [
+        ['inactive', { status: 'inactive' }],
+        ['not_yet_valid', { validFrom: tomorrow }],
+        ['expired', { validUntil: yesterday }],
+        ['usage_limit', { usageCount: 1, usageLimit: 1 }],
+        ['customer_required', { customerLimit: 1 }],
+        ['min_purchase', { minPurchase: 4000 }],
+        ['not_applicable', { appliesToProducts: [product.id] }],
+        ['not_applicable', { appliesToCategories: [category.id] }],
+      ]
+
+      for (const [index, [reason, extra]] of refusals.entries()) {
+        const coupon = await createCoupon(`REFUSED${index}`, extra)
+        const result = await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: coupon.code })
+
+        expect(result, reason).toMatchObject({
+          coupon: { id: coupon.id, code: coupon.code },
+          discount: 0,
+          error: expect.any(String),
+          freeShipping: false,
+          reason,
+          valid: false,
+        })
+        // The amount is only reported for the refusal it explains.
+        expect(result.minPurchase, reason).toBe(reason === 'min_purchase' ? 4000 : undefined)
+      }
+
+      // No coupon has the code, so there is no document to return.
+      const missing = await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: 'REFUSEDMISSING' })
+      expect(missing).toMatchObject({ error: 'Coupon not found', reason: 'not_found', valid: false })
+      expect(missing.coupon).toBeUndefined()
+
+      // With a customer, a per-customer coupon is usable until that customer's orders reach the limit.
+      const limited = await createCoupon('REFUSEDPERCUSTOMER', { customerLimit: 1 })
+      const preview = { cartTotal: 20, code: limited.code, userId: user.id }
+      const allowed = await ecommerce.coupons.validateCoupon(preview)
+      expect(allowed).toMatchObject({ discount: 5, valid: true })
+      expect(allowed.reason).toBeUndefined()
+
+      await createOrderWith(product, { coupon: limited.id, user: user.id })
+      expect(await ecommerce.coupons.validateCoupon(preview)).toMatchObject({
+        coupon: { id: limited.id },
+        reason: 'customer_limit',
+        valid: false,
+      })
     })
 
     test('createOrderFromCart applies a coupon given by code', async () => {
@@ -2545,7 +2611,7 @@ describe('Ecommerce Plugin integration tests', () => {
       // The customer's earlier order is found, so the per-customer limit applies.
       expect(
         await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: coupon.code, userId }),
-      ).toMatchObject({ error: 'Customer usage limit reached', valid: false })
+      ).toMatchObject({ error: 'Customer usage limit reached', reason: 'customer_limit', valid: false })
 
       const cancelled = await ecommerce.orders.updateOrderStatus({ orderId, status: 'cancelled' })
       expect(cancelled.status).toBe('cancelled')
