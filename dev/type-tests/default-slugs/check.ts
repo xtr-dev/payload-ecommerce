@@ -91,3 +91,13 @@ export const orderRejection = (error: unknown): void => {
     expectTrue<Equal<typeof rejection.minPurchase, number | undefined>>()
   }
 }
+
+export const orderParams = async (): Promise<void> => {
+  const shippingAddress = { address1: '1 Main Street', city: 'Amsterdam', country: 'NL', firstName: 'A', lastName: 'B' }
+
+  await ecommerce.orders.createOrderFromCart({ cartId: 1, orderData: { shippingAddress } })
+  // @ts-expect-error -- the address belongs in orderData, which is required.
+  await ecommerce.orders.createOrderFromCart({ cartId: 1 })
+  // @ts-expect-error -- there are no order fields next to cartId.
+  await ecommerce.orders.createOrderFromCart({ cartId: 1, orderData: { shippingAddress }, shippingAddress })
+}

@@ -34,7 +34,7 @@ export interface OrderAddress {
 
 export interface CreateOrderFromCartParams {
   cartId: DocumentId
-  orderData?: {
+  orderData: {
     shippingAddress: OrderAddress
     /** Defaults to the shipping address. */
     billingAddress?: OrderAddress
@@ -57,11 +57,6 @@ export interface CreateOrderFromCartParams {
     status?: string
     paymentStatus?: string
   }
-  // Legacy parameters for backward compatibility
-  shippingAddress?: OrderAddress
-  billingAddress?: OrderAddress
-  paymentMethod?: string
-  notes?: string
 }
 
 export interface UpdateOrderStatusParams {
@@ -144,14 +139,15 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
     // Ids may arrive as text (from a URL or a JSON body); see toDocumentId.
     const cartId = toDocumentId(payload, cartsSlug, params.cartId)
 
-    // Support both new orderData structure and legacy parameters
-    const shippingAddress = orderData?.shippingAddress || params.shippingAddress
-    const billingAddress = orderData?.billingAddress || params.billingAddress
-    const paymentMethod = orderData?.paymentMethod || params.paymentMethod
-    const notes = orderData?.notes || params.notes
+    // `orderData` is required by the type, but callers written in JavaScript, or for a
+    // release that took the address next to `cartId`, can still arrive without it. They
+    // get told where the address goes instead of a failed field validation later on.
+    const { billingAddress, notes, paymentMethod, shippingAddress } = (orderData ?? {}) as Partial<
+      CreateOrderFromCartParams['orderData']
+    >
 
     if (!shippingAddress) {
-      throw new Error('Shipping address is required')
+      throw new Error('Shipping address is required: pass it as orderData.shippingAddress')
     }
 
     const cart = await payload.findByID({
@@ -217,16 +213,16 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
     }
 
     // Use provided values or fall back to calculated/default values
-    const subtotal = orderData?.subtotal ?? roundMoney(calculatedSubtotal)
-    const tax = orderData?.tax ?? 0
-    const shipping = orderData?.shipping ?? 0
-    const discount = orderData?.discount ?? 0
-    const status = orderData?.status || 'pending'
+    const subtotal = orderData.subtotal ?? roundMoney(calculatedSubtotal)
+    const tax = orderData.tax ?? 0
+    const shipping = orderData.shipping ?? 0
+    const discount = orderData.discount ?? 0
+    const status = orderData.status || 'pending'
 
     // The coupon's rules, discount and free shipping are applied by the orders collection
     // when the order is created; here a code only has to be turned into the coupon's id.
-    let couponId = toDocumentId(payload, slugs.coupons, orderData?.coupon)
-    if (couponId === undefined && orderData?.couponCode) {
+    let couponId = toDocumentId(payload, slugs.coupons, orderData.coupon)
+    if (couponId === undefined && orderData.couponCode) {
       const coupon = await createCouponHelpers(payload, slugs, accessOptions).findCouponByCode(
         orderData.couponCode,
       )
@@ -241,14 +237,14 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
       }
       couponId = coupon.id
     }
-    const paymentStatus = orderData?.paymentStatus || 'pending'
+    const paymentStatus = orderData.paymentStatus || 'pending'
 
     const order = await payload.create({
       ...trusted,
       collection: ordersSlug,
       data: {
         user: getRelationshipId(cart.user),
-        customerEmail: orderData?.customerEmail,
+        customerEmail: orderData.customerEmail,
         items,
         subtotal,
         tax,
