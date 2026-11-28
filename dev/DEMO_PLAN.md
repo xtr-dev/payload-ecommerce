@@ -48,7 +48,7 @@ The plugin provides 5 core collections:
 
 ### Utilities
 
-**Server-side** (`src/lib/useEcommerce.ts`):
+**Server-side** (`src/lib/getEcommerce.ts`):
 - `cart` helpers: addToCart, updateCartItem, getCart, removeFromCart
 - `orders` helpers: createOrderFromCart, updateOrderStatus, getUserOrders
 - `products` helpers: getProduct, getProducts, checkInventory, reduceInventory

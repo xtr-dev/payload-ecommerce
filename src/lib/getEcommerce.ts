@@ -21,8 +21,11 @@ export type EcommerceHelperOptions = HelperAccessOptions
  * and cart and order-status writes run as that user. `createOrderFromCart` then still
  * creates the order itself, after reading the cart as the user; coupon validation and
  * the inventory helpers always run with full access.
+ *
+ * It is a plain function, not a React hook: call it anywhere on the server, as often as
+ * needed. Each call only reads the slugs from the config and builds closures.
  */
-export const useEcommerce = (payload: Payload, options: EcommerceHelperOptions = {}) => {
+export const getEcommerce = (payload: Payload, options: EcommerceHelperOptions = {}) => {
   // The slugs the plugin recorded in the config, so renamed collections need no arguments here.
   const slugs = getEcommerceSlugs(payload)
 
@@ -39,4 +42,13 @@ export const useEcommerce = (payload: Payload, options: EcommerceHelperOptions =
   }
 }
 
-export type EcommerceHelpers = ReturnType<typeof useEcommerce>
+export type EcommerceHelpers = ReturnType<typeof getEcommerce>
+
+/**
+ * The name `getEcommerce` was released under in 0.1.0.
+ *
+ * @deprecated Use `getEcommerce`. This function is not a React hook, but a name starting
+ * with `use` makes the `react-hooks/rules-of-hooks` lint rule reject every call outside a
+ * component. Both names are the same function.
+ */
+export const useEcommerce = getEcommerce

@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
-import { resolveUnitPrice, useEcommerce } from 'payload-ecommerce';
+import { resolveUnitPrice, getEcommerce } from 'payload-ecommerce';
 
 export async function POST(request: Request) {
   try {
     const payload = await getPayload({ config: configPromise });
-    const ecommerce = useEcommerce(payload);
+    const ecommerce = getEcommerce(payload);
 
     const body = await request.json();
     const { productId, quantity = 1, variant } = body;

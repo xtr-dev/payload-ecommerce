@@ -36,12 +36,12 @@ export interface EcommerceAccess {
 /**
  * Builds the default access control of the plugin's collections. It applies to REST,
  * GraphQL, the admin panel and Local API calls made with `overrideAccess: false`; the
- * plugin's own hooks and the `useEcommerce` helpers (by default) bypass it.
+ * plugin's own hooks and the `getEcommerce` helpers (by default) bypass it.
  *
  * - products: everyone reads products whose status is `active`; admins read and write all.
  * - categories: everyone reads; admins write.
  * - coupons: admins only, so codes cannot be listed. Storefronts validate a code through
- *   `useEcommerce(payload).coupons.validateCoupon` on the server.
+ *   `getEcommerce(payload).coupons.validateCoupon` on the server.
  * - orders: a signed-in user reads the orders whose `user` is them; admins read and write
  *   all. Orders are created on the server (`createOrderFromCart`), never by a customer
  *   through the API, because the caller of a create decides prices and discounts.
@@ -108,7 +108,7 @@ export const createEcommerceAccess = (isAdmin: IsAdmin, userCollection: string):
 }
 
 /**
- * How the `useEcommerce` helpers call Payload's Local API.
+ * How the `getEcommerce` helpers call Payload's Local API.
  *
  * By default the helpers are trusted server code: they bypass access control
  * (`overrideAccess: true`), which is what a checkout for guests needs, since a guest cart

@@ -9,7 +9,7 @@ import {
   getEcommerceSlugs,
   getRelationshipId,
   payloadEcommerce,
-  useEcommerce,
+  getEcommerce,
 } from '../src/index.js'
 import { adjustCouponUsage, adjustStock, claimOrderRelease } from '../src/lib/atomic.js'
 import config from './payload.renamed.config.js'
@@ -111,7 +111,7 @@ describe('renamed collections', () => {
   })
 
   test('cart, coupon, order, stock and cancellation work through the helpers', async () => {
-    const ecommerce = useEcommerce(payload)
+    const ecommerce = getEcommerce(payload)
 
     const category = await payload.create({ collection: 'shop-categories', data: { name: 'Renamed Category' } })
     const product = await payload.create({
@@ -207,7 +207,7 @@ describe('renamed collections', () => {
       data: { price: 7, status: 'active', title: 'Renamed Customer Product' },
     })
 
-    const ecommerce = useEcommerce(payload)
+    const ecommerce = getEcommerce(payload)
     const cart = await ecommerce.cart.addToCart({ productId: product.id, quantity: 1, userId: customer.id })
     expect(getRelationshipId(cart.user)).toBe(customer.id)
 
@@ -238,7 +238,7 @@ describe('renamed collections', () => {
     expect(await exists(first.id)).toBe(false)
 
     const second = await createExpired('renamed-expired-2')
-    expect((await useEcommerce(payload).cart.deleteExpiredCarts()).deleted).toBeGreaterThanOrEqual(1)
+    expect((await getEcommerce(payload).cart.deleteExpiredCarts()).deleted).toBeGreaterThanOrEqual(1)
     expect(await exists(second.id)).toBe(false)
 
     const third = await createExpired('renamed-expired-3')
@@ -336,7 +336,7 @@ describe('renamed collections', () => {
 
 describe('integer cents with roundMoney: Math.round', () => {
   test('discount, tax and total of an order are whole cents', async () => {
-    const ecommerce = useEcommerce(payload)
+    const ecommerce = getEcommerce(payload)
     const product = await payload.create({
       collection: 'shop-products',
       data: { price: 1995, status: 'active', title: 'Cents Product' },
@@ -371,7 +371,7 @@ describe('integer cents with roundMoney: Math.round', () => {
       collection: 'vouchers',
       data: { code: 'CENTSALL', status: 'active', type: 'percentage', value: 100 },
     })
-    const preview = await useEcommerce(payload).coupons.validateCoupon({ cartTotal: 0.4, code: 'CENTSALL' })
+    const preview = await getEcommerce(payload).coupons.validateCoupon({ cartTotal: 0.4, code: 'CENTSALL' })
 
     expect(preview.discount).toBe(0)
   })

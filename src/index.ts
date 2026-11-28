@@ -20,8 +20,8 @@ import { DEFAULT_ECOMMERCE_SLUGS, ECOMMERCE_CUSTOM_KEY } from './lib/slugs.js'
  */
 export type CollectionExtender = (baseCollection: CollectionConfig) => CollectionConfig
 
-export { useEcommerce } from './lib/useEcommerce.js'
-export type { EcommerceHelperOptions, EcommerceHelpers } from './lib/useEcommerce.js'
+export { getEcommerce, useEcommerce } from './lib/getEcommerce.js'
+export type { EcommerceHelperOptions, EcommerceHelpers } from './lib/getEcommerce.js'
 export { createEcommerceAccess, defaultIsAdmin } from './lib/access.js'
 export type { EcommerceAccess, IsAdmin } from './lib/access.js'
 export { ECOMMERCE_CUSTOM_KEY, getEcommerceSlugs } from './lib/slugs.js'
@@ -219,7 +219,7 @@ export const payloadEcommerce =
       collections.coupons,
     ]
 
-    // The server helpers (`useEcommerce`, `deleteExpiredCarts`) read the slugs from here,
+    // The server helpers (`getEcommerce`, `deleteExpiredCarts`) read the slugs from here,
     // and hooks and helpers the money rounding. Recorded also when the plugin is disabled,
     // because the collections still exist. `custom` is never sent to the browser, so it
     // can hold a function.
