@@ -169,10 +169,10 @@ export const evaluateCoupon = async (
   }
 
   // The coupons collection sets the status to `expired` when a coupon is saved after its
-  // `validUntil`, so that status is the same refusal as the date check below. The message
-  // is the one every non-active status has always had, for callers that match on it.
+  // `validUntil`, so that status is the same refusal as the date check below, with the
+  // same reason and message.
   if (coupon.status === 'expired') {
-    return rejected('expired', 'Coupon is not active', { coupon })
+    return rejected('expired', 'Coupon has expired', { coupon })
   }
 
   if (coupon.status !== 'active') {
