@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
 import { getEcommerce } from 'payload-ecommerce';
+import { toCouponPreview } from '@/lib/couponPreview';
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +24,8 @@ export async function POST(request: Request) {
       userId,
     });
 
-    return NextResponse.json(result);
+    // The result contains the whole coupon document; the browser only gets a selection.
+    return NextResponse.json(toCouponPreview(result));
   } catch (error: any) {
     console.error('Error validating coupon:', error);
     return NextResponse.json(

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
 import { createOrders as createOrdersCollection } from '../src/collections/Orders.js'
 import { adjustCouponUsage, adjustStock, claimOrderRelease } from '../src/lib/atomic.js'
+import { toCouponPreview } from './lib/couponPreview.js'
 import { DEFAULT_ECOMMERCE_SLUGS } from '../src/lib/slugs.js'
 import {
   calculateOrderTotal,
@@ -565,7 +566,7 @@ describe('Ecommerce Plugin integration tests', () => {
         name: 'a coupon past its end date',
         // The coupons collection marks such a coupon expired when it is saved.
         data: { validUntil: new Date(Date.now() - 86_400_000).toISOString() },
-        error: 'not active',
+        error: 'has expired',
         reason: 'expired',
       },
       {
@@ -760,6 +761,26 @@ describe('Ecommerce Plugin integration tests', () => {
         expect(result.minPurchase, reason).toBe(reason === 'min_purchase' ? 4000 : undefined)
       }
 
+      // A coupon is expired by its status or by its end date; both say so in the same words.
+      const expiredByStatus = await createCoupon('REFUSEDEXPIREDSTATUS', { status: 'expired' })
+      const expiredByDate = await createCoupon('REFUSEDEXPIREDDATE', {})
+      // Written past the collection hook, which would turn the status into `expired`.
+      // The whole document is passed because older SQL adapters insert-or-update the row.
+      const { id: expiredByDateId, ...expiredByDateFields } = expiredByDate
+      await payload.db.updateOne({
+        id: expiredByDateId,
+        collection: 'coupons',
+        data: { ...expiredByDateFields, validUntil: yesterday },
+      })
+      for (const coupon of [expiredByStatus, expiredByDate]) {
+        expect(
+          await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: coupon.code }),
+        ).toMatchObject({ error: 'Coupon has expired', reason: 'expired', valid: false })
+      }
+      expect(
+        await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: 'REFUSED0' }),
+      ).toMatchObject({ error: 'Coupon is not active', reason: 'inactive', valid: false })
+
       // No coupon has the code, so there is no document to return.
       const missing = await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: 'REFUSEDMISSING' })
       expect(missing).toMatchObject({ error: 'Coupon not found', reason: 'not_found', valid: false })
@@ -778,6 +799,51 @@ describe('Ecommerce Plugin integration tests', () => {
         reason: 'customer_limit',
         valid: false,
       })
+    })
+
+    test('the demo coupon route tells the browser the outcome and nothing else about the coupon', async () => {
+      const ecommerce = getEcommerce(payload)
+      await payload.create({
+        collection: 'coupons',
+        data: {
+          code: 'PREVIEWSECRET',
+          description: 'Internal: for the spring campaign',
+          minPurchase: 50,
+          status: 'active',
+          type: 'percentage',
+          usageCount: 2,
+          usageLimit: 7,
+          value: 10,
+        },
+      })
+
+      const accepted = toCouponPreview(
+        await ecommerce.coupons.validateCoupon({ cartTotal: 100, code: 'previewsecret' }),
+      )
+      expect(accepted).toEqual({
+        code: 'PREVIEWSECRET',
+        discount: 10,
+        freeShipping: false,
+        message: 'PREVIEWSECRET',
+        valid: true,
+      })
+
+      const refused = toCouponPreview(
+        await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: 'previewsecret' }),
+      )
+      expect(refused).toEqual({
+        code: 'PREVIEWSECRET',
+        discount: 0,
+        freeShipping: false,
+        message: 'Minimum purchase amount of 50 required',
+        minPurchase: 50,
+        reason: 'min_purchase',
+        valid: false,
+      })
+
+      const unknown = toCouponPreview(await ecommerce.coupons.validateCoupon({ cartTotal: 20, code: 'NOSUCHCODE' }))
+      expect(unknown).toMatchObject({ message: 'Coupon not found', reason: 'not_found', valid: false })
+      expect(unknown.code).toBeUndefined()
     })
 
     test('createOrderFromCart applies a coupon given by code', async () => {

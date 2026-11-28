@@ -430,7 +430,7 @@ A refusal has a `reason` to word your own message from. `error` is an English de
 | `min_purchase` | `cartTotal` is below `minPurchase`; the result also has `minPurchase`, the stored amount, to format as your shop formats money |
 | `not_applicable` | it is restricted to products or categories and the cart has none of them |
 
-The checks run in this order and the first one that fails is reported. The types are exported as `ApplyCouponResult` and `CouponRefusalReason`. `coupon` is the whole coupon document, so pick the fields you need before sending a result to the browser.
+The checks run in this order and the first one that fails is reported. `error` is `Coupon has expired` for both ways a coupon expires (0.2.0 said `Coupon is not active` for the status). The types are exported as `ApplyCouponResult` and `CouponRefusalReason`. `coupon` is the whole coupon document (usage count, limits, restrictions, your internal description), also on a refusal, so pick the fields you need before sending a result to the browser; `dev/lib/couponPreview.ts` in this repository shows one way.
 
 A restricted percentage or fixed coupon discounts the whole subtotal once a matching product is in the order, not only the matching lines.
 
