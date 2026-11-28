@@ -2957,9 +2957,15 @@ describe('Ecommerce Plugin integration tests', () => {
         mug.title,
         shirt.title,
       ])
-      // The search looks in the title, the description and the SKU.
+      // The search looks in the title and the SKU.
       expect(titles(await products.getProducts({ search: `MUG-${run}` }))).toEqual([mug.title])
-      expect(titles(await products.getProducts({ category: category.id, search: 'cotton' }))).toEqual([shirt.title])
+      expect(titles(await products.getProducts({ search: `helper shirt ${run}` }))).toEqual([shirt.title])
+      // It also looks in the description, except on Postgres: a rich text value is jsonb
+      // there, which cannot be matched against text, and a search that tried used to fail
+      // with a database error instead of returning the products matching by title or SKU.
+      expect(titles(await products.getProducts({ category: category.id, search: 'cotton' }))).toEqual(
+        payload.db.name === 'postgres' ? [] : [shirt.title],
+      )
     })
 
     test('getProducts pages through the results', async () => {

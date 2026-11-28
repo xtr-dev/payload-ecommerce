@@ -113,6 +113,8 @@ payloadEcommerce({
 - Optional stock tracking (`inventory.trackQuantity`, `inventory.quantity`). `inventory.lowStockThreshold` is a plain field for your own use; the plugin sends no low-stock alerts
 - Status: draft | active | archived
 
+`ecommerce.products.getProducts({ search })` looks for the text in the title and the SKU. On SQLite it also matches the description; on Postgres it does not, because the description is rich text, which Postgres stores as `jsonb` and cannot match against text.
+
 ### Orders
 - Order number, items, subtotal, discount, tax, shipping and a computed total
 - A shipping address (first name, last name, address line, city and country are required; `state` and `postalCode` are optional, since not every country has them) and an optional billing address
