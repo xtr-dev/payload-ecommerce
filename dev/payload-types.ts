@@ -285,6 +285,7 @@ export interface Category {
 export interface Order {
   id: number;
   orderNumber?: string | null;
+  accessToken?: string | null;
   /**
    * User who placed the order (optional for guest orders)
    */
@@ -1007,6 +1008,7 @@ export interface CategoriesSelect<T extends boolean = true> {
  */
 export interface OrdersSelect<T extends boolean = true> {
   orderNumber?: T;
+  accessToken?: T;
   user?: T;
   customerEmail?: T;
   items?:

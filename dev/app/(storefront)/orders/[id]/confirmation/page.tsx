@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
+import { getEcommerce } from 'payload-ecommerce';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { OrderStatusBadge } from '@/components/storefront/OrderStatusBadge';
@@ -15,18 +16,20 @@ interface PageProps {
   params: Promise<{
     id: string;
   }>;
+  searchParams: Promise<{
+    token?: string | string[];
+  }>;
 }
 
-export default async function OrderConfirmationPage({ params }: PageProps) {
+export default async function OrderConfirmationPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const { token } = await searchParams;
   const payload = await getPayload({ config: configPromise });
 
-  // Fetch order
-  const order = await payload.findByID({
-    collection: 'orders',
-    id: id,
-    depth: 2,
-  });
+  // The page is public and order ids are easy to guess, so the id alone opens nothing:
+  // the link the checkout hands the customer carries the order's access token, and
+  // without the right one the order is treated as not existing.
+  const order = await getEcommerce(payload).orders.getOrderByToken({ orderId: id, token });
 
   if (!order) {
     notFound();

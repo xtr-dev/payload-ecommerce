@@ -11,6 +11,7 @@ import { isCartExpired } from './cartExpiry.js'
 import { createCouponHelpers } from './coupons.js'
 import { toDocumentId } from './ids.js'
 import { getRoundMoney } from './money.js'
+import { matchesOrderAccessToken } from './orderAccessToken.js'
 import { OrderRejectedError } from './orderRejection.js'
 import { resolveUnitPrice } from './pricing.js'
 import { getRelationshipId } from './relationships.js'
@@ -70,6 +71,18 @@ export interface UpdateOrderStatusParams {
   trackingUrl?: string
 }
 
+/**
+ * Which order a visitor asks for and the access token they present for it. Give exactly
+ * one of `orderId` and `orderNumber`; both usually come straight from a URL, so any value
+ * is accepted and one that cannot belong to an order simply finds nothing.
+ */
+export interface GetOrderByTokenParams {
+  orderId?: unknown
+  orderNumber?: unknown
+  /** The token from the visitor's link. */
+  token: unknown
+}
+
 /** The helpers of `getEcommerce(payload).orders`. `TOrder` is the type of an order document. */
 export interface OrderHelpers<TOrder = UntypedDocument> {
   /**
@@ -83,8 +96,24 @@ export interface OrderHelpers<TOrder = UntypedDocument> {
    * expired or empty, and when the orders collection rejects the order (stock, coupon).
    * A stock or coupon rejection is an `OrderRejectedError`; `getOrderRejection(error)`
    * returns its cause.
+   *
+   * The returned order includes its `accessToken`, also when the helpers were created
+   * with `overrideAccess: false`: the caller is the server code that just placed the
+   * order, and needs the token to build the customer's link to it (see `getOrderByToken`).
    */
   createOrderFromCart: (params: CreateOrderFromCartParams) => Promise<TOrder>
+  /**
+   * Returns the order with this id or order number when `token` is its `accessToken`, with
+   * relationships populated (depth 2), and `null` otherwise. A wrong token, an order that
+   * does not exist and an order without a token all give `null`, so ids and order numbers
+   * cannot be probed. The token is compared in constant time.
+   *
+   * This is how a guest reaches their order: the token is on the order
+   * `createOrderFromCart` returns, and goes into the link you give the customer. It always
+   * reads with full access, also for helpers created with `overrideAccess: false`,
+   * because presenting the token is the permission.
+   */
+  getOrderByToken: (params: GetOrderByTokenParams) => Promise<null | TOrder>
   /** Returns the order with its relationships populated (depth 2). Throws when it does not exist. */
   getOrder: (orderId: DocumentId) => Promise<TOrder>
   /** Returns a page of the customer's orders, newest first, with relationships populated (depth 2). */
@@ -275,6 +304,38 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
     })
   }
 
+  const getOrderByToken = async ({ orderId, orderNumber, token }: GetOrderByTokenParams) => {
+    const isKey = (value: unknown): value is DocumentId =>
+      (typeof value === 'string' && value !== '') || typeof value === 'number'
+
+    // Without a usable token nothing can match, so the database is not asked at all.
+    if (typeof token !== 'string' || token === '' || isKey(orderId) === isKey(orderNumber)) {
+      return null
+    }
+
+    let order: null | UntypedDocument = null
+    try {
+      const { docs } = await payload.find({
+        ...trusted,
+        collection: ordersSlug,
+        depth: 2,
+        limit: 1,
+        pagination: false,
+        where: isKey(orderId)
+          ? { id: { equals: toDocumentId(payload, ordersSlug, orderId) } }
+          : { orderNumber: { equals: String(orderNumber) } },
+      })
+      order = docs[0] ?? null
+    } catch {
+      // The id came from a URL; one that is not a valid id for this database (text where
+      // a number is expected, a malformed ObjectId) makes the query fail instead of
+      // finding nothing. To the visitor that is the same as an order that does not exist.
+      return null
+    }
+
+    return matchesOrderAccessToken(order, token) ? order : null
+  }
+
   const getUserOrders = async (userId: DocumentId) => {
     return await payload.find({
       ...caller,
@@ -302,6 +363,7 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
     createOrderFromCart,
     updateOrderStatus,
     getOrder,
+    getOrderByToken,
     getUserOrders,
   }
 

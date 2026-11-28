@@ -96,7 +96,9 @@ export async function POST(request: Request) {
     // Amount should be in cents (use order total which includes calculated tax)
     const amountInCents = Math.round(order.total * 100);
     const baseUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000';
-    const returnUrl = `${baseUrl}/orders/${order.id}/confirmation`;
+    // The confirmation page only shows an order to the holder of its access token, which
+    // is how a guest gets back to their order after paying.
+    const returnUrl = `${baseUrl}/orders/${order.id}/confirmation?token=${order.accessToken}`;
 
     let payment = null;
     let redirectUrl = null;

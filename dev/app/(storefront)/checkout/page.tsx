@@ -177,8 +177,8 @@ export default function CheckoutPage() {
         // Redirect to payment page (test provider) or confirmation
         window.location.href = result.redirectUrl;
       } else if (result.success) {
-        // Fallback redirect to confirmation
-        router.push(`/orders/${result.orderId}/confirmation`);
+        // Fallback redirect to confirmation; the page needs the order's access token.
+        router.push(`/orders/${result.orderId}/confirmation?token=${result.order.accessToken}`);
       } else {
         alert(result.error || 'Failed to create order');
       }
