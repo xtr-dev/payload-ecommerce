@@ -2339,7 +2339,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     describe('server helpers', () => {
-      it('keeps the 0.1.0 name useEcommerce as an alias of getEcommerce', () => {
+      test('keeps the 0.1.0 name useEcommerce as an alias of getEcommerce', () => {
         expect(useEcommerce).toBe(getEcommerce)
       })
 
