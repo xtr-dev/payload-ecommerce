@@ -3,6 +3,157 @@
   "schemaVersion": 2,
   "versions": [
     {
+      "version": "0.3.0",
+      "date": "2026-11-28",
+      "commit": "5b19c44",
+      "breaking": true,
+      "groups": {
+        "breaking": [
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "createOrderFromCart reads the order's fields from orderData only (#29)",
+            "commit": "3bafd89",
+            "hash": "3bafd894a4627cd9c2cfc6a7c7f88e7beae2d7eb",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "say \"Coupon has expired\" for a coupon with status expired (#28)",
+            "commit": "2b26b75",
+            "hash": "2b26b75bedded7e14b36af7c5fe0b688fae4277c",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ],
+        "features": [
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "createOrderFromCart reads the order's fields from orderData only (#29)",
+            "commit": "3bafd89",
+            "hash": "3bafd894a4627cd9c2cfc6a7c7f88e7beae2d7eb",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "give every order an access token so a guest can reach their order (#26)",
+            "commit": "b1229bc",
+            "hash": "b1229bcf32c1e6ba458771c30c2596126086452c",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "put a machine-readable cause on order rejections (#25)",
+            "commit": "474890a",
+            "hash": "474890a1c17a9ccf1a0e4afeb21e03ed9d42bfe2",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ],
+        "fixes": [
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "say \"Coupon has expired\" for a coupon with status expired (#28)",
+            "commit": "2b26b75",
+            "hash": "2b26b75bedded7e14b36af7c5fe0b688fae4277c",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "fix",
+            "scope": null,
+            "description": "round cart subtotals and order line totals, and stop coupon saves from overwriting the usage count (#27)",
+            "commit": "6c31431",
+            "hash": "6c31431846d46ef7f771b7e514b9e0f79c1b1804",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ],
+        "other": [
+          {
+            "type": "test",
+            "scope": null,
+            "description": "cover the helpers and the demo's storefront routes, draw seed images locally, drop the template e2e spec (#31)",
+            "commit": "5b19c44",
+            "hash": "5b19c44c8269d7966b5eaa6994e6e457326afbc8",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "docs",
+            "scope": null,
+            "description": "describe what a database error does to a cancelled order's stock without transactions (#30)",
+            "commit": "cdb2c76",
+            "hash": "cdb2c767aa1c5c46ae00bf500ebafb3c5ca354b5",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "version": "0.2.0",
       "date": "2026-11-28",
       "commit": "cfac910",

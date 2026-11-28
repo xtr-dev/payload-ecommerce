@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/xtr-dev/payload-ecommerce/compare/v0.2.0...v0.3.0) - 2026-11-28
+
+### Breaking
+- createOrderFromCart reads the order's fields from orderData only ([#29](https://github.com/xtr-dev/payload-ecommerce/issues/29)) ([3bafd89](https://github.com/xtr-dev/payload-ecommerce/commit/3bafd894a4627cd9c2cfc6a7c7f88e7beae2d7eb))
+- say "Coupon has expired" for a coupon with status expired ([#28](https://github.com/xtr-dev/payload-ecommerce/issues/28)) ([2b26b75](https://github.com/xtr-dev/payload-ecommerce/commit/2b26b75bedded7e14b36af7c5fe0b688fae4277c))
+
+### Features
+- give every order an access token so a guest can reach their order ([#26](https://github.com/xtr-dev/payload-ecommerce/issues/26)) ([b1229bc](https://github.com/xtr-dev/payload-ecommerce/commit/b1229bcf32c1e6ba458771c30c2596126086452c))
+- put a machine-readable cause on order rejections ([#25](https://github.com/xtr-dev/payload-ecommerce/issues/25)) ([474890a](https://github.com/xtr-dev/payload-ecommerce/commit/474890a1c17a9ccf1a0e4afeb21e03ed9d42bfe2))
+
+### Fixes
+- round cart subtotals and order line totals, and stop coupon saves from overwriting the usage count ([#27](https://github.com/xtr-dev/payload-ecommerce/issues/27)) ([6c31431](https://github.com/xtr-dev/payload-ecommerce/commit/6c31431846d46ef7f771b7e514b9e0f79c1b1804))
+
+### Other
+- cover the helpers and the demo's storefront routes, draw seed images locally, drop the template e2e spec ([#31](https://github.com/xtr-dev/payload-ecommerce/issues/31)) ([5b19c44](https://github.com/xtr-dev/payload-ecommerce/commit/5b19c44c8269d7966b5eaa6994e6e457326afbc8))
+- describe what a database error does to a cancelled order's stock without transactions ([#30](https://github.com/xtr-dev/payload-ecommerce/issues/30)) ([cdb2c76](https://github.com/xtr-dev/payload-ecommerce/commit/cdb2c767aa1c5c46ae00bf500ebafb3c5ca354b5))
+
 ## [0.2.0](https://github.com/xtr-dev/payload-ecommerce/compare/v0.1.0...v0.2.0) - 2026-11-28
 
 ### Breaking

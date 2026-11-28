@@ -1,6 +1,6 @@
 {
   "name": "@xtr-dev/payload-ecommerce",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "PayloadCMS plugin for e-commerce functionality - products, orders, carts, and checkout",
   "license": "MIT",
   "author": "XTR Development <dev@xtr.dev>",
