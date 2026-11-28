@@ -71,6 +71,9 @@ export class OrderRejectedError extends ValidationError {
     req?: PayloadRequest
   }) {
     super({ collection: args.collection, errors: [{ message: args.message, path: args.path }] }, args.req?.t)
+    // Older Payload releases name an error after its class. Payload's admin panel and
+    // REST clients recognise a validation error by this name, so it is pinned.
+    this.name = 'ValidationError'
     this.message = args.message
     this.rejection = args.rejection
     ;(this.data as Record<string, unknown>).rejection = args.rejection
