@@ -178,6 +178,8 @@ const result = await ecommerce.coupons.validateCoupon({
 })
 ```
 
+`createOrderFromCart` takes everything about the order in `orderData`; `shippingAddress` is the only required part. (0.2.0 and earlier also read `shippingAddress`, `billingAddress`, `paymentMethod` and `notes` next to `cartId`; those are no longer read.)
+
 Document ids are strings on MongoDB and numbers on SQLite and Postgres. Every helper accepts both, and converts an id to the type its collection uses, so a numeric id that arrives as text (`'5'` from a URL, a form or a JSON body) works on SQL databases. `toDocumentId(payload, collectionSlug, id)` is exported for your own Local API calls. A relationship field holds either a bare id or the populated document, depending on `depth`. Use the exported `getRelationshipId` to read the id in both cases:
 
 ```typescript

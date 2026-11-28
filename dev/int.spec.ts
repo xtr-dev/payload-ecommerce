@@ -846,6 +846,33 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(unknown.code).toBeUndefined()
     })
 
+    test('createOrderFromCart takes the address from orderData only', async () => {
+      const ecommerce = getEcommerce(payload)
+      const product = await createProduct('Order Data Only Product', 30)
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 1,
+        sessionId: 'order-data-only-session',
+      })
+
+      // The address next to cartId, as the first releases accepted it, is not read.
+      for (const params of [{ cartId: cart.id, shippingAddress: address }, { cartId: cart.id }]) {
+        await expect(ecommerce.orders.createOrderFromCart(params as any)).rejects.toThrow(
+          'Shipping address is required: pass it as orderData.shippingAddress',
+        )
+      }
+      expect((await payload.findByID({ id: cart.id, collection: 'carts' })).items).toHaveLength(1)
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: { notes: 'Ring twice', paymentMethod: 'invoice', shippingAddress: address },
+      })
+      expect(order).toMatchObject({ notes: 'Ring twice', paymentMethod: 'invoice' })
+      expect(order.shippingAddress.address1).toBe(address.address1)
+      // Without a billing address the shipping address is used.
+      expect(order.billingAddress.address1).toBe(address.address1)
+    })
+
     test('createOrderFromCart applies a coupon given by code', async () => {
       const ecommerce = getEcommerce(payload)
       const product = await createProduct('Cart Coupon Code Product', 30)
