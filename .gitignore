@@ -42,11 +42,8 @@ yarn-error.log*
 
 /dev/media
 
-# Playwright
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
+# Coverage report of `pnpm test:coverage`
+/coverage/
 
 # SQLite database files
 *.db

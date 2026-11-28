@@ -2,6 +2,7 @@ import type { Payload } from 'payload';
 import { categoriesSeedData } from './categories';
 import { productsSeedData } from './products';
 import { couponsSeedData } from './coupons';
+import { createPlaceholderImage } from './placeholderImage';
 
 export async function seedDatabase(payload: Payload) {
   console.log('Starting database seed...');
@@ -64,15 +65,14 @@ export async function seedDatabase(payload: Payload) {
     for (const product of productsSeedData) {
       const categoryId = categoryMap.get(product.category);
 
-      // Download and create image if imageUrl is provided
+      // Every product gets a picture drawn on the spot (see createPlaceholderImage), so
+      // seeding never needs the network. SEED_SKIP_IMAGES=true (set by vitest.config.js)
+      // leaves the pictures out: storing and resizing twenty uploads slows every test run
+      // down and no test looks at them.
       let imageId;
-      // SEED_SKIP_IMAGES=true (set by vitest.config.js) keeps the test run off the network:
-      // the product images are downloaded from picsum.photos and no test needs them.
-      if ((product as any).imageUrl && process.env.SEED_SKIP_IMAGES !== 'true') {
+      if (process.env.SEED_SKIP_IMAGES !== 'true') {
         try {
-          console.log(`Downloading image for ${product.title}...`);
-          const imageResponse = await fetch((product as any).imageUrl);
-          const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+          const imageBuffer = await createPlaceholderImage(product.title);
 
           const mediaDoc = await payload.create({
             collection: 'media',
@@ -88,9 +88,8 @@ export async function seedDatabase(payload: Payload) {
           });
 
           imageId = mediaDoc.id;
-          console.log(`Created image for ${product.title}`);
         } catch (error) {
-          console.error(`Failed to download image for ${product.title}:`, error);
+          console.error(`Failed to create image for ${product.title}:`, error);
         }
       }
 
@@ -110,7 +109,11 @@ export async function seedDatabase(payload: Payload) {
             quantity: product.quantity,
             lowStockThreshold: product.lowStockThreshold,
           },
-          variants: product.variants,
+          // The seed data calls a variant's own stock `quantity`; the field is `inventory`.
+          variants: product.variants?.map(({ quantity, ...variant }: any) => ({
+            ...variant,
+            inventory: quantity,
+          })),
           images: imageId ? [imageId] : [],
         },
       });

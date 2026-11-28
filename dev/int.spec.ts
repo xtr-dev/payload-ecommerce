@@ -8,6 +8,12 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import { createOrders as createOrdersCollection } from '../src/collections/Orders.js'
 import { adjustCouponUsage, adjustStock, claimOrderRelease } from '../src/lib/atomic.js'
 import { toCouponPreview } from './lib/couponPreview.js'
+import {
+  createPlaceholderImage,
+  PLACEHOLDER_IMAGE_HEIGHT,
+  PLACEHOLDER_IMAGE_WIDTH,
+} from './seed-data/placeholderImage.js'
+import { productsSeedData } from './seed-data/products.js'
 import { DEFAULT_ECOMMERCE_SLUGS } from '../src/lib/slugs.js'
 import {
   calculateOrderTotal,
@@ -2902,6 +2908,431 @@ describe('Ecommerce Plugin integration tests', () => {
         const bobsCart = await payload.findByID({ id: bobCart.id, collection: 'carts' })
         expect(bobsCart.items).toHaveLength(1)
       })
+    })
+  })
+
+  describe('product helpers', () => {
+    const run = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+    let category: any
+    let shirt: any
+    let mug: any
+    let draft: any
+
+    beforeAll(async () => {
+      category = await payload.create({ collection: 'categories', data: { name: `Helper Category ${run}` } })
+      const createProduct = async (data: Record<string, unknown>) =>
+        await payload.create({ collection: 'products', data: { status: 'active', ...data } as any })
+
+      shirt = await createProduct({
+        categories: [category.id],
+        description: 'Soft cotton',
+        price: 20,
+        sku: `SHIRT-${run}`,
+        title: `Helper Shirt ${run}`,
+      })
+      mug = await createProduct({ price: 8, sku: `MUG-${run}`, title: `Helper Mug ${run}` })
+      draft = await createProduct({ price: 20, status: 'draft', title: `Helper Draft ${run}` })
+    })
+
+    const titles = (result: { docs: Array<{ title: string }> }) => result.docs.map((doc) => doc.title).sort()
+
+    test('getProducts returns active products unless another status is asked for', async () => {
+      const { products } = getEcommerce(payload)
+
+      expect(titles(await products.getProducts({ limit: 100, search: run }))).toEqual([mug.title, shirt.title])
+      expect(titles(await products.getProducts({ search: run, status: 'draft' }))).toEqual([draft.title])
+    })
+
+    test('getProducts filters by category, price range and search text', async () => {
+      const { products } = getEcommerce(payload)
+
+      const inCategory = await products.getProducts({ category: String(category.id) })
+      expect(titles(inCategory)).toEqual([shirt.title])
+      // Relationships are populated.
+      expect(inCategory.docs[0].categories[0].name).toBe(category.name)
+
+      expect(titles(await products.getProducts({ maxPrice: 8, search: run }))).toEqual([mug.title])
+      expect(titles(await products.getProducts({ minPrice: 8.01, search: run }))).toEqual([shirt.title])
+      expect(titles(await products.getProducts({ maxPrice: 20, minPrice: 8, search: run }))).toEqual([
+        mug.title,
+        shirt.title,
+      ])
+      // The search looks in the title, the description and the SKU.
+      expect(titles(await products.getProducts({ search: `MUG-${run}` }))).toEqual([mug.title])
+      expect(titles(await products.getProducts({ category: category.id, search: 'cotton' }))).toEqual([shirt.title])
+    })
+
+    test('getProducts pages through the results', async () => {
+      const { products } = getEcommerce(payload)
+
+      const first = await products.getProducts({ limit: 1, page: 1, search: run })
+      const second = await products.getProducts({ limit: 1, page: 2, search: run })
+
+      expect(first.totalDocs).toBe(2)
+      expect(first.docs).toHaveLength(1)
+      expect(second.docs).toHaveLength(1)
+      expect(titles({ docs: [...first.docs, ...second.docs] })).toEqual([mug.title, shirt.title])
+    })
+
+    test('a product that does not track its quantity is always available and its stock is left alone', async () => {
+      const { products } = getEcommerce(payload)
+
+      expect(await products.checkInventory(mug.id, 1000)).toEqual({ available: true, quantity: Infinity })
+      expect((await products.reduceInventory(mug.id, 5)).id).toBe(mug.id)
+      expect((await products.restoreInventory(mug.id, 5)).id).toBe(mug.id)
+      expect((await products.getProduct(mug.id)).inventory?.quantity ?? 0).toBe(0)
+    })
+
+    test('the inventory helpers work on a variant with its own stock and say when stock is short', async () => {
+      const { products } = getEcommerce(payload)
+      const product = await payload.create({
+        collection: 'products',
+        data: {
+          inventory: { quantity: 5, trackQuantity: true },
+          price: 10,
+          status: 'active',
+          title: `Helper Variant Stock ${run}`,
+          variants: [{ name: 'Small', inventory: 2 }],
+        },
+      })
+      const smallStock = (doc: any) => doc.variants.find((variant: any) => variant.name === 'Small').inventory
+
+      expect(await products.checkInventory(product.id, 3, 'Small')).toEqual({ available: false, quantity: 2 })
+      expect(await products.checkInventory(product.id, 3)).toEqual({ available: true, quantity: 5 })
+
+      expect(smallStock(await products.reduceInventory(product.id, 2, 'Small'))).toBe(0)
+      await expect(products.reduceInventory(product.id, 1, 'Small')).rejects.toThrow(
+        `Not enough stock for "Helper Variant Stock ${run}" (variant "Small"): 1 requested, 0 available`,
+      )
+      const restored = await products.restoreInventory(product.id, 1, 'Small')
+      expect(smallStock(restored)).toBe(1)
+      expect(restored.inventory.quantity).toBe(5)
+    })
+
+    test('the inventory helpers throw for a product that does not exist', async () => {
+      const { products } = getEcommerce(payload)
+      const gone = await payload.create({
+        collection: 'products',
+        data: { price: 1, status: 'active', title: `Helper Deleted ${run}` },
+      })
+      await payload.delete({ id: gone.id, collection: 'products' })
+
+      await expect(products.checkInventory(gone.id, 1)).rejects.toThrow(`Product not found: ${gone.id}`)
+      await expect(products.reduceInventory(gone.id, 1)).rejects.toThrow('Product not found')
+      await expect(products.restoreInventory(gone.id, 1)).rejects.toThrow('Product not found')
+    })
+  })
+
+  describe('coupon and order helpers', () => {
+    const run = `${Date.now()}`.slice(-8) + Math.floor(Math.random() * 1e4)
+
+    test('incrementCouponUsage counts a use up to the limit and decrementCouponUsage never goes below zero', async () => {
+      const { coupons } = getEcommerce(payload)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: `HELPERCOUNT${run}`, status: 'active', type: 'fixed', usageLimit: 2, value: 1 },
+      })
+
+      // The id as text, as it arrives from a request.
+      expect((await coupons.incrementCouponUsage(String(coupon.id))).usageCount).toBe(1)
+      expect((await coupons.incrementCouponUsage(coupon.id)).usageCount).toBe(2)
+      await expect(coupons.incrementCouponUsage(coupon.id)).rejects.toThrow(
+        'Coupon not found or its usage limit is reached',
+      )
+
+      expect((await coupons.decrementCouponUsage(coupon.id)).usageCount).toBe(1)
+      expect((await coupons.decrementCouponUsage(String(coupon.id))).usageCount).toBe(0)
+      expect((await coupons.decrementCouponUsage(coupon.id)).usageCount).toBe(0)
+    })
+
+    test('incrementCouponUsage throws for a coupon that does not exist', async () => {
+      const { coupons } = getEcommerce(payload)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: `HELPERGONE${run}`, status: 'active', type: 'fixed', value: 1 },
+      })
+      await payload.delete({ id: coupon.id, collection: 'coupons' })
+
+      await expect(coupons.incrementCouponUsage(coupon.id)).rejects.toThrow(
+        'Coupon not found or its usage limit is reached',
+      )
+    })
+
+    test('applyCoupon is validateCoupon with positional arguments', async () => {
+      const { coupons } = getEcommerce(payload)
+      const product = await payload.create({
+        collection: 'products',
+        data: { price: 40, status: 'active', title: `Helper Apply Product ${run}` },
+      })
+      await payload.create({
+        collection: 'coupons',
+        data: {
+          appliesToProducts: [product.id],
+          code: `HELPERAPPLY${run}`,
+          status: 'active',
+          type: 'percentage',
+          value: 25,
+        },
+      })
+
+      expect(await coupons.applyCoupon(`helperapply${run}`, 40, undefined, [product.id])).toMatchObject({
+        discount: 10,
+        valid: true,
+      })
+      expect(await coupons.applyCoupon(`helperapply${run}`, 40)).toMatchObject({
+        reason: 'not_applicable',
+        valid: false,
+      })
+    })
+
+    test('updateOrderStatus stores the tracking number and URL when they are given', async () => {
+      const { orders } = getEcommerce(payload)
+      const product = await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'active', title: `Helper Tracking Product ${run}` },
+      })
+      const order = await payload.create({
+        collection: 'orders',
+        data: {
+          items: [{ price: 10, product: product.id, quantity: 1, total: 10 }],
+          shippingAddress: {
+            address1: '1 Main Street',
+            city: 'Amsterdam',
+            country: 'NL',
+            firstName: 'Test',
+            lastName: 'Customer',
+          },
+          subtotal: 10,
+        },
+      })
+
+      const shipped = await orders.updateOrderStatus({
+        orderId: order.id,
+        status: 'shipped',
+        trackingNumber: '3SABCD123',
+        trackingUrl: 'https://carrier.example/3SABCD123',
+      })
+      expect(shipped).toMatchObject({
+        status: 'shipped',
+        trackingNumber: '3SABCD123',
+        trackingUrl: 'https://carrier.example/3SABCD123',
+      })
+
+      // A later status change without tracking details keeps the stored ones.
+      const delivered = await orders.updateOrderStatus({ orderId: order.id, status: 'delivered' })
+      expect(delivered).toMatchObject({ status: 'delivered', trackingNumber: '3SABCD123' })
+    })
+
+    test('createOrderFromCart refuses a cart that does not exist or is empty', async () => {
+      const { cart: carts, orders } = getEcommerce(payload)
+      const shippingAddress = {
+        address1: '1 Main Street',
+        city: 'Amsterdam',
+        country: 'NL',
+        firstName: 'Test',
+        lastName: 'Customer',
+      }
+      const product = await payload.create({
+        collection: 'products',
+        data: { price: 10, status: 'active', title: `Helper Empty Cart Product ${run}` },
+      })
+      const cart = await carts.addToCart({ productId: product.id, quantity: 1, sessionId: `helper-empty-${run}` })
+      await carts.clearCart(cart.id)
+
+      await expect(orders.createOrderFromCart({ cartId: cart.id, orderData: { shippingAddress } })).rejects.toThrow(
+        'Cart is empty or not found',
+      )
+
+      await payload.delete({ id: cart.id, collection: 'carts' })
+      await expect(orders.createOrderFromCart({ cartId: cart.id, orderData: { shippingAddress } })).rejects.toThrow(
+        'Cart is empty or not found',
+      )
+    })
+  })
+
+  // The demo's route handlers are called the way Next.js calls them, without a browser:
+  // the same storefront flow a visitor clicks through, from an empty cart to the page
+  // that shows the placed order.
+  describe('demo storefront routes', () => {
+    const run = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+    const sessionId = `demo-routes-${run}`
+    const address = {
+      address1: '1 Main Street',
+      city: 'Amsterdam',
+      country: 'NL',
+      firstName: 'Test',
+      lastName: 'Customer',
+      postalCode: '1000 AA',
+      state: 'NH',
+    }
+
+    const call = async (
+      handler: (request: Request) => Promise<Response>,
+      body?: unknown,
+    ): Promise<{ json: any; status: number }> => {
+      const response = await handler(
+        new Request('http://localhost:3000/api/demo', {
+          body: body === undefined ? undefined : JSON.stringify(body),
+          headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+          method: body === undefined ? 'GET' : 'POST',
+        }),
+      )
+
+      return { json: await response.json(), status: response.status }
+    }
+
+    test('a visitor fills a cart, previews a coupon, checks out and can open the order with its token', async () => {
+      const { POST: addToCart } = await import('./app/api/cart/add/route.js')
+      const { GET: readCart } = await import('./app/api/cart/me/route.js')
+      const { POST: validateCoupon } = await import('./app/api/coupons/validate/route.js')
+      const { POST: createOrder } = await import('./app/api/checkout/create-order/route.js')
+
+      const product = await payload.create({
+        collection: 'products',
+        data: {
+          inventory: { quantity: 3, trackQuantity: true },
+          price: 25,
+          status: 'active',
+          title: `Demo Route Product ${run}`,
+        },
+      })
+      await payload.create({
+        collection: 'coupons',
+        data: {
+          code: `DEMOROUTE${run.replace(/\D/g, '')}`,
+          description: 'Internal note',
+          status: 'active',
+          type: 'percentage',
+          value: 10,
+        },
+      })
+      const code = `demoroute${run.replace(/\D/g, '')}`
+
+      expect((await call(readCart)).json).toEqual({ items: [], subtotal: 0 })
+      expect((await call(addToCart, {})).status).toBe(400)
+
+      const added = await call(addToCart, { productId: product.id, quantity: 2 })
+      expect(added.status).toBe(200)
+      expect(added.json.cart.subtotal).toBe(50)
+      expect((await call(readCart)).json.subtotal).toBe(50)
+
+      const preview = await call(validateCoupon, { cartTotal: 50, code, productIds: [product.id] })
+      expect(preview.json).toEqual({
+        code: code.toUpperCase(),
+        discount: 5,
+        freeShipping: false,
+        message: code.toUpperCase(),
+        valid: true,
+      })
+      expect((await call(validateCoupon, { cartTotal: 50 })).status).toBe(400)
+
+      expect((await call(createOrder, { couponCode: code })).status).toBe(400)
+      const checkout = await call(createOrder, {
+        billingAddress: address,
+        couponCode: code,
+        shippingAddress: address,
+      })
+      expect(checkout.status).toBe(200)
+      // Shipping is 10 below a subtotal of 100, and the dev config taxes 10% of 50 − 5.
+      expect(checkout.json.order).toMatchObject({ discount: 5, shipping: 10, subtotal: 50, tax: 4.5, total: 59.5 })
+      expect((await payload.findByID({ id: product.id, collection: 'products' })).inventory.quantity).toBe(1)
+
+      // The link the customer is sent back to carries the order's access token, and that
+      // token is what opens the order on the public confirmation page.
+      const order = await payload.findByID({ id: checkout.json.orderId, collection: 'orders' })
+      expect(decodeURIComponent(checkout.json.redirectUrl)).toContain(
+        `/orders/${order.id}/confirmation?token=${order.accessToken}`,
+      )
+      const { orders } = getEcommerce(payload)
+      expect((await orders.getOrderByToken({ orderId: String(order.id), token: order.accessToken }))?.id).toBe(order.id)
+    })
+
+    test('checkout answers 409 with the cause when the stock ran out after the cart was filled', async () => {
+      const { POST: addToCart } = await import('./app/api/cart/add/route.js')
+      const { POST: createOrder } = await import('./app/api/checkout/create-order/route.js')
+
+      const product = await payload.create({
+        collection: 'products',
+        data: {
+          inventory: { quantity: 1, trackQuantity: true },
+          price: 25,
+          status: 'active',
+          title: `Demo Route Last One ${run}`,
+        },
+      })
+      expect((await call(addToCart, { productId: product.id, quantity: 1 })).status).toBe(200)
+      // Someone else buys the last one.
+      await getEcommerce(payload).products.reduceInventory(product.id, 1)
+
+      const checkout = await call(createOrder, { billingAddress: address, shippingAddress: address })
+
+      expect(checkout.status).toBe(409)
+      expect(checkout.json.rejection).toEqual({
+        type: 'stock',
+        reason: 'out_of_stock',
+        product: product.id,
+        requested: 1,
+        available: 0,
+      })
+    })
+  })
+
+  describe('demo seed', () => {
+    test('product pictures are drawn locally, so seeding needs no network', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+      try {
+        const image = await createPlaceholderImage('Classic <White> T-Shirt & "Co"')
+        const metadata = await (await import('sharp')).default(image).metadata()
+
+        expect(metadata).toMatchObject({
+          format: 'jpeg',
+          height: PLACEHOLDER_IMAGE_HEIGHT,
+          width: PLACEHOLDER_IMAGE_WIDTH,
+        })
+        expect(fetchSpy).not.toHaveBeenCalled()
+      } finally {
+        fetchSpy.mockRestore()
+      }
+
+      expect(JSON.stringify(productsSeedData)).not.toMatch(/https?:\/\//)
+    })
+
+    test('a drawn picture is accepted as an upload, the way the seed stores it', async () => {
+      const image = await createPlaceholderImage('Seed Upload Check')
+      const media = await payload.create({
+        collection: 'media',
+        data: { alt: 'Seed Upload Check' },
+        file: {
+          name: `seed-upload-check-${Date.now()}.jpg`,
+          data: image,
+          mimetype: 'image/jpeg',
+          size: image.length,
+        },
+      })
+
+      try {
+        expect(media).toMatchObject({
+          height: PLACEHOLDER_IMAGE_HEIGHT,
+          mimeType: 'image/jpeg',
+          width: PLACEHOLDER_IMAGE_WIDTH,
+        })
+      } finally {
+        // Deleting the document also removes the file from dev/media.
+        await payload.delete({ id: media.id, collection: 'media' })
+      }
+    })
+
+    test('the seeded variants have the stock of their own that the seed data gives them', async () => {
+      const seeded = productsSeedData.find((product) => product.variants?.length)!
+      const { docs } = await payload.find({
+        collection: 'products',
+        where: { slug: { equals: seeded.slug } },
+      })
+
+      expect(docs[0].variants.map((variant: any) => variant.inventory)).toEqual(
+        seeded.variants!.map((variant) => variant.quantity),
+      )
     })
   })
 
