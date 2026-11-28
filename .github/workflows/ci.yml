@@ -101,3 +101,69 @@ jobs:
         env:
           # Where mongodb-memory-server keeps its download; only "Test (MongoDB)" uses it.
           MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
+
+  # The same integration tests on a Postgres server, on the locked Payload and on the oldest
+  # supported one. Postgres is the adapter that always runs Payload's operations in a
+  # transaction, so this is where a statement the plugin sends outside the request's
+  # transaction shows up: it waits on a lock or does not see the request's own writes. It is
+  # a job of its own because only these runs need the database service.
+  postgres:
+    name: ${{ matrix.task.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task:
+          - name: Test (Postgres)
+          - name: Test (Postgres, oldest supported Payload)
+            oldestPayload: true
+    services:
+      postgres:
+        # The plugin has no point fields, so the image needs no PostGIS.
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Holds the steps back until the server accepts connections.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Keep the package list equal to the one in the check job above.
+      - name: Install the oldest supported Payload
+        if: matrix.task.oldestPayload
+        run: >-
+          pnpm add -D
+          payload@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/db-mongodb@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/db-postgres@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/db-sqlite@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/next@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/richtext-lexical@${{ env.MIN_PAYLOAD_VERSION }}
+          @payloadcms/ui@${{ env.MIN_PAYLOAD_VERSION }}
+          next@${{ env.MIN_PAYLOAD_NEXT_VERSION }}
+
+      - name: ${{ matrix.task.name }}
+        run: pnpm test:postgres
+        env:
+          # Only used to reach the server: the tests create their own databases on it and
+          # drop them afterwards (dev/helpers/postgresGlobalSetup.ts).
+          DATABASE_URI: postgres://postgres:postgres@127.0.0.1:5432/postgres

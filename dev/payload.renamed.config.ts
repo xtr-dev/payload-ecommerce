@@ -1,4 +1,5 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
+import { postgresAdapter } from '@payloadcms/db-postgres'
 import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
@@ -21,16 +22,19 @@ import { fileURLToPath } from 'url'
  */
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const useMongoDB = process.env.DATABASE_ADAPTER === 'mongodb'
+const adapterName = process.env.DATABASE_ADAPTER || 'sqlite'
 const baseUri = process.env.DATABASE_URI || `file:${path.resolve(dirname, 'payload.db')}`
 
-const databaseAdapter = useMongoDB
-  ? mongooseAdapter({
-      ensureIndexes: true,
-      // Same server, other database name (the path segment before the query string).
-      url: baseUri.replace(/\/([^/?]+)(\?|$)/, '/$1-renamed$2'),
-    })
-  : sqliteAdapter({ client: { url: baseUri.replace(/\.db$/, '-renamed.db') } })
+/** A MongoDB or Postgres connection string for the same server with a suffix added to the database name (the path segment before the query string). */
+const withDatabaseSuffix = (uri: string, suffix: string): string => uri.replace(/\/([^/?]+)(\?|$)/, `/$1${suffix}$2`)
+
+const databaseAdapter =
+  adapterName === 'mongodb'
+    ? mongooseAdapter({ ensureIndexes: true, url: withDatabaseSuffix(baseUri, '-renamed') })
+    : adapterName === 'postgres'
+      ? // `pnpm test:postgres` creates this database next to the main one (see dev/helpers/postgresGlobalSetup.ts).
+        postgresAdapter({ pool: { connectionString: withDatabaseSuffix(baseUri, '_renamed') } })
+      : sqliteAdapter({ client: { url: baseUri.replace(/\.db$/, '-renamed.db') } })
 
 export default buildConfig({
   admin: { user: 'customers' },

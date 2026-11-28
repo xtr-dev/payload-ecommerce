@@ -8,7 +8,7 @@ This file provides guidance to Claude Code when working in the @xtr-dev/payload-
 
 ## Tech Stack
 
-- **Framework**: PayloadCMS plugin, peer range `^3.37.0`. The dev environment and lockfile use Payload 3.94.2 / Next 16 / vitest 4; the CI job "Test (oldest supported Payload)" reinstalls 3.37.0 and runs both suites, so do not use a Payload API newer than 3.37 without a guard (see the schedule test in `dev/renamed.spec.ts`)
+- **Framework**: PayloadCMS plugin, peer range `^3.37.0`. The dev environment and lockfile use Payload 3.94.2 / Next 16 / vitest 4; the CI jobs "Test (oldest supported Payload)" and "Test (Postgres, oldest supported Payload)" reinstall 3.37.0 and run the suites, so do not use a Payload API newer than 3.37 without a guard (see the schedule test in `dev/renamed.spec.ts`)
 - **Build**: SWC for fast transpilation
 - **Package Manager**: pnpm
 - **Dependencies**: none at runtime. @xtr-dev/payload-billing is a dev dependency used by the demo in `dev/` (payment integration)
@@ -23,6 +23,7 @@ pnpm test:types       # Compile dev/type-tests against the built declarations in
 pnpm lint             # Run ESLint
 pnpm test             # Integration tests (vitest run) on SQLite
 pnpm test:mongo       # Same tests on an in-memory MongoDB replica set
+pnpm test:postgres    # Same tests on a Postgres server; needs DATABASE_URI (see README, Development)
 pnpm test:pack        # Build, pack and import every published export
 pnpm test:coverage    # Integration tests with a coverage report for src/
 pnpm dev:generate-types    # Regenerate Payload types
@@ -141,7 +142,7 @@ billingPlugin({
 
 ## Tests
 
-Integration tests are in `dev/int.spec.ts` (default slugs) and `dev/renamed.spec.ts` (every collection renamed, own database). `pnpm test` runs them against a temporary SQLite database (numeric ids, no transactions) and `pnpm test:mongo` against an in-memory MongoDB replica set (string ids, transactions); CI runs both, so a test must not assume an id type. For operations started at the same time, use the `settleConcurrently` helper in that file: it retries MongoDB's transient write conflicts. Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.
+Integration tests are in `dev/int.spec.ts` (default slugs) and `dev/renamed.spec.ts` (every collection renamed, own database). `pnpm test` runs them against a temporary SQLite database (numeric ids, no transactions) `pnpm test:mongo` against an in-memory MongoDB replica set (string ids, transactions) and `pnpm test:postgres` against new databases on a Postgres server (numeric ids, transactions); CI runs all three, so a test must not assume an id type or that a write is visible outside its transaction before it commits. For operations started at the same time, use the `settleConcurrently` helper in that file: it retries MongoDB's transient write conflicts. Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.
 
 There are no browser tests. The demo's storefront flow is covered in `dev/int.spec.ts` ("demo storefront routes") by calling the route handlers in `dev/app/api` directly. The dev seed draws its product pictures locally (`dev/seed-data/placeholderImage.ts`) and must not use the network.
 
