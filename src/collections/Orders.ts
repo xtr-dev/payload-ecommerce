@@ -799,6 +799,13 @@ export const createOrders = (
 
             if (await release('inventoryReduced')) {
               // What is given back is what the order held before this save, hence previousDoc.
+              // The lines are separate statements. In a transaction a failure on a later
+              // line rolls everything back, this update and the claim included. Without
+              // one, the earlier lines stay restored and the claim stays cleared, and
+              // there is no sound way to finish or undo the rest from here: redoing the
+              // claim would restore the earlier lines twice on a retry, and taking them
+              // back could fail on stock that was sold in the meantime. The README lists
+              // this under the limits.
               const lines = previousDoc?.items || doc.items || []
               const demand = collectStockDemand(lines, await loadLineProducts(req, productsSlug, lines))
 
