@@ -1,14 +1,15 @@
 import type { CollectionConfig, Field, PayloadRequest } from 'payload'
-import { ValidationError } from 'payload'
 import type { PayloadEcommerceConfig } from '../index.js'
 import { describeStockShortage, resolveStockTarget } from '../lib/products.js'
 import { adjustCouponUsage, adjustStock, claimOrderRelease, hasActiveTransaction } from '../lib/atomic.js'
 import { evaluateCoupon, RELEASED_ORDER_STATUSES } from '../lib/coupons.js'
 import type { DocumentId } from '../lib/relationships.js'
 import type { EcommerceSlugs } from '../lib/slugs.js'
+import type { StockOrderRejection } from '../lib/orderRejection.js'
 import { getRelationshipId } from '../lib/relationships.js'
 import { calculateOrderTotal } from '../lib/totals.js'
 import { getRoundMoney } from '../lib/money.js'
+import { OrderRejectedError } from '../lib/orderRejection.js'
 
 /**
  * Order fields that are passed to the `calculateTax` hook. A change to any of them can
@@ -165,21 +166,18 @@ const collectStockDemand = (lines: OrderLine[], products: Map<string, any>): Sto
 }
 
 /**
- * Builds the error that rejects an order. It is a Payload ValidationError, so the admin UI
- * and the REST API report it on the given field, but with the reason as its `message`:
- * Payload's own message only says which field is invalid, which tells a caller of the
- * local API nothing about what to change.
+ * The machine-readable form of a stock shortage. `available` is left out when the number
+ * that was read may be out of date, which is the case after losing a race against
+ * another order.
  */
-const orderError = (
-  collection: string,
-  path: string,
-  message: string,
-  req: PayloadRequest,
-): ValidationError => {
-  const error = new ValidationError({ collection, errors: [{ message, path }] }, req.t)
-  error.message = message
-  return error
-}
+const stockRejection = (entry: StockDemand, available?: number): StockOrderRejection => ({
+  type: 'stock',
+  reason: 'out_of_stock',
+  product: entry.productId,
+  ...(entry.variant === undefined ? {} : { variant: entry.variant }),
+  requested: entry.quantity,
+  ...(available === undefined ? {} : { available }),
+})
 
 /**
  * Builds the error that fails an order create or update because its tax could not be
@@ -517,7 +515,17 @@ export const createOrders = (
             })
 
             if (!result.valid) {
-              throw orderError(collection.slug, 'coupon', result.error || 'Coupon is not valid', req)
+              throw new OrderRejectedError({
+                collection: collection.slug,
+                message: result.error,
+                path: 'coupon',
+                rejection: {
+                  type: 'coupon',
+                  reason: result.reason,
+                  ...(result.minPurchase === undefined ? {} : { minPurchase: result.minPurchase }),
+                },
+                req,
+              })
             }
 
             data.discount = result.discount
@@ -542,12 +550,18 @@ export const createOrders = (
               : []
             for (const entry of demand) {
               if (entry.available < entry.quantity) {
-                throw orderError(
-                  collection.slug,
-                  'items',
-                  describeStockShortage(entry.product, entry.lineVariant, entry.quantity, entry.available),
+                throw new OrderRejectedError({
+                  collection: collection.slug,
+                  message: describeStockShortage(
+                    entry.product,
+                    entry.lineVariant,
+                    entry.quantity,
+                    entry.available,
+                  ),
+                  path: 'items',
+                  rejection: stockRejection(entry, entry.available),
                   req,
-                )
+                })
               }
             }
 
@@ -660,12 +674,13 @@ export const createOrders = (
                   if (!taken) {
                     // Another order took the units between the check in beforeChange and
                     // this update. `available` was read before that, so it is not repeated.
-                    throw orderError(
-                      collection.slug,
-                      'items',
-                      describeStockShortage(entry.product, entry.lineVariant, entry.quantity),
+                    throw new OrderRejectedError({
+                      collection: collection.slug,
+                      message: describeStockShortage(entry.product, entry.lineVariant, entry.quantity),
+                      path: 'items',
+                      rejection: stockRejection(entry),
                       req,
-                    )
+                    })
                   }
                   takenStock.push(entry)
                 }
@@ -681,7 +696,15 @@ export const createOrders = (
                 })
 
                 if (!counted) {
-                  throw orderError(collection.slug, 'coupon', 'Coupon usage limit reached', req)
+                  // Another order took the coupon's last use between the check in
+                  // beforeChange and this update.
+                  throw new OrderRejectedError({
+                    collection: collection.slug,
+                    message: 'Coupon usage limit reached',
+                    path: 'coupon',
+                    rejection: { type: 'coupon', reason: 'usage_limit' },
+                    req,
+                  })
                 }
                 countedCouponId = couponId
               }

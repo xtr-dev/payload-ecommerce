@@ -38,6 +38,8 @@ export type {
   RefusedCouponResult,
   ValidateCouponParams,
 } from './lib/coupons.js'
+export { getOrderRejection, OrderRejectedError } from './lib/orderRejection.js'
+export type { CouponOrderRejection, OrderRejection, StockOrderRejection } from './lib/orderRejection.js'
 export type { EcommerceDocument, EcommerceDocumentTypes, UntypedDocument } from './lib/documents.js'
 export type { CartHelpers } from './lib/cart.js'
 export type { OrderHelpers } from './lib/orders.js'

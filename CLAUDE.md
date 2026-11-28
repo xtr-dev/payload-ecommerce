@@ -86,6 +86,7 @@ No collection slug is hardcoded. The collections are factories (`createProducts(
 - `src/lib/ids.ts` - `toDocumentId`: every helper converts incoming ids to the collection's id type (numeric strings on SQL)
 - `src/lib/totals.ts` - the only place an order total is computed
 - `src/lib/coupons.ts` - coupon rules (`evaluateCoupon`), shared by `validateCoupon` and the Orders hook
+- `src/lib/orderRejection.ts` - `OrderRejectedError` (a ValidationError with the cause as `rejection` and `data.rejection`) and `getOrderRejection`; every stock or coupon refusal of an order is thrown through it
 - `src/lib/atomic.ts` - conditional single-statement stock and coupon-usage updates (SQL via the adapter's `execute`, MongoDB via `$inc`), with a non-atomic fallback that logs a one-time warning. The "atomic updates" tests in `dev/int.spec.ts` fail when the fallback is taken
 - `src/lib/cartExpiry.ts` - cart lifetime, `deleteExpiredCarts` and the optional jobs task
 - `src/lib/slug.ts` - slug generation hook shared by products and categories

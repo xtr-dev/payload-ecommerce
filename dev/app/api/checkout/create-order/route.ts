@@ -1,6 +1,6 @@
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
-import { getRelationshipId, getEcommerce } from 'payload-ecommerce';
+import { getOrderRejection, getRelationshipId, getEcommerce } from 'payload-ecommerce';
 import type { DocumentId } from 'payload-ecommerce';
 import {NextResponse} from "next/server"
 
@@ -167,6 +167,13 @@ export async function POST(request: Request) {
       } : null,
     });
   } catch (error: any) {
+    // Stock that sold out or a coupon that ran out since the cart page was shown is the
+    // customer's to resolve, so it is answered with the cause instead of a server error.
+    const rejection = getOrderRejection(error);
+    if (rejection) {
+      return NextResponse.json({ error: error.message, rejection }, { status: 409 });
+    }
+
     console.error('Error creating order:', error);
     return NextResponse.json(
       { error: error.message || 'Failed to create order' },

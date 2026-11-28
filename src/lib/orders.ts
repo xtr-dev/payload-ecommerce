@@ -11,6 +11,7 @@ import { isCartExpired } from './cartExpiry.js'
 import { createCouponHelpers } from './coupons.js'
 import { toDocumentId } from './ids.js'
 import { getRoundMoney } from './money.js'
+import { OrderRejectedError } from './orderRejection.js'
 import { resolveUnitPrice } from './pricing.js'
 import { getRelationshipId } from './relationships.js'
 import { calculateOrderTotal } from './totals.js'
@@ -80,6 +81,8 @@ export interface OrderHelpers<TOrder = UntypedDocument> {
   /**
    * Creates an order from a cart and empties the cart. Throws when the cart is missing,
    * expired or empty, and when the orders collection rejects the order (stock, coupon).
+   * A stock or coupon rejection is an `OrderRejectedError`; `getOrderRejection(error)`
+   * returns its cause.
    */
   createOrderFromCart: (params: CreateOrderFromCartParams) => Promise<TOrder>
   /** Returns the order with its relationships populated (depth 2). Throws when it does not exist. */
@@ -196,7 +199,13 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
         orderData.couponCode,
       )
       if (!coupon) {
-        throw new Error(`Coupon not found: ${orderData.couponCode}`)
+        throw new OrderRejectedError({
+          collection: ordersSlug,
+          message: `Coupon not found: ${orderData.couponCode}`,
+          path: 'coupon',
+          rejection: { type: 'coupon', reason: 'not_found' },
+          req: trusted.req,
+        })
       }
       couponId = coupon.id
     }
