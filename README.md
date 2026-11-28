@@ -15,7 +15,7 @@
 - 🏷️ **Coupons** - Percentage, fixed amount and free shipping, validated and applied when the order is created
 - 📊 **Inventory** - Stock checked before an order is created and reduced atomically, so concurrent orders cannot oversell
 - 💰 **Tax** - A `calculateTax` hook you implement (fixed rate, per region, or a call to a tax service)
-- 🔧 **Helpers** - `useEcommerce(payload)` for carts, orders, coupons and products on the server
+- 🔧 **Helpers** - `getEcommerce(payload)` for carts, orders, coupons and products on the server
 
 Not included: payment processing, emails and shipping rates. Payments are shown in the demo app with [@xtr-dev/payload-billing](https://github.com/xtr-dev/payload-billing); see [Not included](#not-included).
 
@@ -60,7 +60,7 @@ The plugin adds the five collections below. Orders and carts relate to your user
 | `hooks.afterCreateOrder` | – | Runs after a new order took its stock; throwing fails the order |
 | `disabled` | `false` | Keeps the collections (fields and access rules, so the database schema does not change) but removes the plugin's collection hooks and does not register the cart cleanup task |
 
-Renaming works everywhere: relationships between the collections, hooks and the server helpers all follow the configured slugs, so `useEcommerce(payload)` needs no slug arguments. `getEcommerceSlugs(payload)` returns the slugs in use.
+Renaming works everywhere: relationships between the collections, hooks and the server helpers all follow the configured slugs, so `getEcommerce(payload)` needs no slug arguments. `getEcommerceSlugs(payload)` returns the slugs in use.
 
 The collections are locked down by default: only an admin can manage them, and by default an admin is a user with `role: 'admin'`. Read [Access control](#access-control) before you open the admin panel.
 
@@ -76,7 +76,7 @@ Every collection gets access rules, which apply to REST, GraphQL, the admin pane
 | orders | – | read their own (`user` is them) | read and write all |
 | carts | – | read, create and update their own (`user` is them) | read and write all |
 
-- Guest carts (`sessionId`) and guest orders are not reachable through the API without an admin. A storefront reaches them on the server through `useEcommerce(payload)`.
+- Guest carts (`sessionId`) and guest orders are not reachable through the API without an admin. A storefront reaches them on the server through `getEcommerce(payload)`.
 - Orders are created on the server (`createOrderFromCart`), not by customers through the API: whoever creates an order decides its prices.
 - Coupons cannot be listed or read by customers. Validate a code on the server with `ecommerce.coupons.validateCoupon`.
 - On a cart, only an admin can change `user` and `sessionId` after it is created.
@@ -136,15 +136,17 @@ payloadEcommerce({
 
 ## Server-Side Usage
 
-Use the `useEcommerce` helper for server-side operations:
+Use the `getEcommerce` helper for server-side operations:
+
+> `getEcommerce` was called `useEcommerce` in 0.1.0. The old name still works but is deprecated: it is not a React hook, and the `use` prefix makes the `react-hooks/rules-of-hooks` lint rule reject calls from server actions and route handlers.
 
 ```typescript
 import { getPayload } from 'payload'
-import { useEcommerce } from '@xtr-dev/payload-ecommerce'
+import { getEcommerce } from '@xtr-dev/payload-ecommerce'
 
 const payload = await getPayload({ config })
 // Trusted server code: bypasses access control (see "Helpers and access control" below)
-const ecommerce = useEcommerce(payload)
+const ecommerce = getEcommerce(payload)
 
 // Add to cart
 await ecommerce.cart.addToCart({
@@ -184,13 +186,13 @@ const productIds = cart.items.map((item) => getRelationshipId(item.product))
 
 ### Helpers and access control
 
-`useEcommerce(payload)` bypasses the collections' access rules (`overrideAccess: true`). That is what a storefront needs for guest carts and for creating orders, and it means your server code decides whose cart or order is touched: only pass ids (`userId`, `sessionId`, `cartId`, `orderId`) that belong to the visitor, for example a session id read from your own cookie.
+`getEcommerce(payload)` bypasses the collections' access rules (`overrideAccess: true`). That is what a storefront needs for guest carts and for creating orders, and it means your server code decides whose cart or order is touched: only pass ids (`userId`, `sessionId`, `cartId`, `orderId`) that belong to the visitor, for example a session id read from your own cookie.
 
 To have the helpers enforce the access rules for a signed-in user instead, pass the user (or the request) with `overrideAccess: false`:
 
 ```typescript
-const ecommerce = useEcommerce(payload, { overrideAccess: false, user })
-// or: useEcommerce(payload, { overrideAccess: false, req })
+const ecommerce = getEcommerce(payload, { overrideAccess: false, user })
+// or: getEcommerce(payload, { overrideAccess: false, req })
 
 await ecommerce.cart.getCart(user.id)       // their cart
 await ecommerce.orders.getOrder(orderId)    // throws unless it is their order
@@ -462,7 +464,7 @@ The helpers `ecommerce.products.checkInventory`, `reduceInventory` (throws when 
 ## Not included
 
 - Payments, emails and shipping rates. Set `paymentStatus`, `shipping` and the like from your own integration (the demo uses @xtr-dev/payload-billing).
-- REST endpoints for carts and checkout, and React hooks or components. Call `useEcommerce(payload)` from your own server actions or route handlers, as the demo does.
+- REST endpoints for carts and checkout, and React hooks or components. Call `getEcommerce(payload)` from your own server actions or route handlers, as the demo does.
 
 ## Development
 

@@ -1,13 +1,13 @@
 import { getPayload } from 'payload';
 import configPromise from '@payload-config';
-import { getRelationshipId, useEcommerce } from 'payload-ecommerce';
+import { getRelationshipId, getEcommerce } from 'payload-ecommerce';
 import type { DocumentId } from 'payload-ecommerce';
 import {NextResponse} from "next/server"
 
 export async function POST(request: Request) {
   try {
     const payload = await getPayload({ config: configPromise });
-    const ecommerce = useEcommerce(payload);
+    const ecommerce = getEcommerce(payload);
 
     const body = await request.json();
     const { shippingAddress, billingAddress, paymentMethod, couponCode } = body;

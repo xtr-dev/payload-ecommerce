@@ -22,6 +22,7 @@ import {
   roundToTwoDecimals,
   slugify,
   toDocumentId,
+  getEcommerce,
   useEcommerce,
 } from '../src/index.js'
 
@@ -280,7 +281,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('createOrderFromCart includes shipping, discount and tax in the total', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Totals Cart Product', 25)
 
       const cart = await ecommerce.cart.addToCart({
@@ -474,7 +475,7 @@ describe('Ecommerce Plugin integration tests', () => {
       })
 
     test('coupon codes are stored in upper case and found in any case', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const coupon = await payload.create({
         collection: 'coupons',
         data: { code: ' lowercase15 ', status: 'active', type: 'percentage', value: 15 },
@@ -486,7 +487,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('validateCoupon reports a free shipping coupon with freeShipping and no discount', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       await payload.create({
         collection: 'coupons',
         data: { code: 'SHIPFREE', status: 'active', type: 'freeShipping' },
@@ -500,7 +501,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('validateCoupon caps a discount at the cart total', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       await payload.create({
         collection: 'coupons',
         data: { code: 'FIXED50', status: 'active', type: 'fixed', value: 50 },
@@ -667,7 +668,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('createOrderFromCart applies a coupon given by code', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Cart Coupon Code Product', 30)
       await payload.create({
         collection: 'coupons',
@@ -962,7 +963,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('createOrderFromCart fails and keeps the cart when the calculateTax hook fails', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Failing Tax Cart Product', tracked(5))
       const cart = await ecommerce.cart.addToCart({
         productId: product.id,
@@ -1291,7 +1292,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('reduceInventory throws instead of clamping at zero, restoreInventory adds back', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Helper Stock Product', tracked(2))
 
       await expect(ecommerce.products.reduceInventory(product.id, 3)).rejects.toThrow(
@@ -1333,7 +1334,7 @@ describe('Ecommerce Plugin integration tests', () => {
       await payload.update({ id: cartId, collection: 'carts', data: { expiresAt: daysFromNow(-1) } })
 
     test('a new cart expires 30 days from now', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Expiry New Cart Product')
 
       const cart = await ecommerce.cart.addToCart({
@@ -1348,7 +1349,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('changing a cart moves its expiry to 30 days from now', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Expiry Sliding Product')
       const sessionId = 'expiry-sliding-session'
 
@@ -1368,7 +1369,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('an expired cart is treated as absent and a new cart is created', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Expiry Absent Product')
       const sessionId = 'expiry-absent-session'
 
@@ -1393,7 +1394,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('an expired cart cannot be turned into an order', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Expiry Order Product')
 
       const cart = await ecommerce.cart.addToCart({
@@ -1420,7 +1421,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('deleteExpiredCarts deletes expired carts only', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Expiry Cleanup Product')
 
       const expired = await ecommerce.cart.addToCart({
@@ -1449,7 +1450,7 @@ describe('Ecommerce Plugin integration tests', () => {
 
     // The dev config sets cartCleanupTask, which registers the task without scheduling it.
     test('the opt-in jobs task deletes expired carts when the host queues and runs it', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProduct('Expiry Task Product')
 
       expect(
@@ -1593,7 +1594,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('the cart subtotal prices each line at its variant price', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProductWithVariants('Variant Price Cart Product')
       const sessionId = 'variant-price-cart-session'
 
@@ -1630,7 +1631,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('createOrderFromCart prices each line at its variant price, matching the cart subtotal', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createProductWithVariants('Variant Price Order Product')
       const sessionId = 'variant-price-order-session'
 
@@ -1653,7 +1654,7 @@ describe('Ecommerce Plugin integration tests', () => {
 
   describe('cart lines are identified by product and variant', () => {
     const createCartWithThreeLines = async (name: string) => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await payload.create({
         collection: 'products',
         data: { price: 10, status: 'active', title: `Cart Line Product ${name}`, variants: [{ name: 'Large' }, { name: 'Small' }] },
@@ -1725,7 +1726,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('updateCartItem throws when the cart has no line for that product and variant', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await payload.create({
         collection: 'products',
         data: { price: 10, status: 'active', title: 'Cart Line Product missing', variants: [{ name: 'Large' }] },
@@ -1849,7 +1850,7 @@ describe('Ecommerce Plugin integration tests', () => {
     )
 
     test('createOrderFromCart copies cart items with their product, price and stock change', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createTrackedProduct('Cart Order Product', 8, 12.5)
       const coupon = await createCouponWithCode('CARTORDER')
 
@@ -1885,7 +1886,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('cart helpers find an existing item by product id', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const product = await createTrackedProduct('Cart Helper Product', 20, 5)
       const sessionId = 'cart-helper-session'
 
@@ -1917,7 +1918,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('a coupon limited to products applies only to carts containing one of them', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const included = await createTrackedProduct('Coupon Included Product', 1)
       const excluded = await createTrackedProduct('Coupon Excluded Product', 1)
       await createCouponWithCode('PRODUCTONLY', { appliesToProducts: [included.id] })
@@ -1945,7 +1946,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('a coupon limited to categories applies only to carts containing one of them', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const included = await payload.create({
         collection: 'categories',
         data: { name: 'Coupon Included Category' },
@@ -2338,8 +2339,12 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     describe('server helpers', () => {
+      it('keeps the 0.1.0 name useEcommerce as an alias of getEcommerce', () => {
+        expect(useEcommerce).toBe(getEcommerce)
+      })
+
       test('by default the helpers bypass access control, so guest carts and checkout work', async () => {
-        const ecommerce = useEcommerce(payload)
+        const ecommerce = getEcommerce(payload)
         const sessionId = `access-helper-guest-${run}`
 
         const cart = await ecommerce.cart.addToCart({ productId: activeProduct.id, quantity: 2, sessionId })
@@ -2358,7 +2363,7 @@ describe('Ecommerce Plugin integration tests', () => {
       })
 
       test('with overrideAccess: false the helpers act as the given user', async () => {
-        const asAlice = useEcommerce(payload, {
+        const asAlice = getEcommerce(payload, {
           overrideAccess: false,
           user: { ...alice, collection: 'users' },
         })
@@ -2424,7 +2429,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('by default a percentage discount, tax and total are rounded to two decimals', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const code = `ROUND${Date.now()}`
       const product = await payload.create({
         collection: 'products',
@@ -2481,7 +2486,7 @@ describe('Ecommerce Plugin integration tests', () => {
     // On SQLite every id below is a numeric string such as '12', the form in which an id
     // arrives from a URL parameter or a form; on MongoDB String() changes nothing.
     test('cart, order, coupon and product helpers accept ids as strings', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const run = `${Date.now()}`
       const user = await payload.create({
         collection: 'users',
@@ -2600,7 +2605,7 @@ describe('Ecommerce Plugin integration tests', () => {
     )
 
     test('a guest cart becomes an order without a user that carries the customer email', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const { id } = await product()
       const sessionId = `guest-order-${Date.now()}`
 
@@ -2624,7 +2629,7 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test('an order with something that is not an email address as customerEmail is rejected', async () => {
-      const ecommerce = useEcommerce(payload)
+      const ecommerce = getEcommerce(payload)
       const { id } = await product()
       const cart = await ecommerce.cart.addToCart({
         productId: id,

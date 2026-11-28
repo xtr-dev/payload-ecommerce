@@ -25,7 +25,7 @@ const amount = (value: null | number | undefined): number =>
  * Binary floating point noise such as 0.1 + 0.2 = 0.30000000000000004 is always removed
  * (rounding to six decimals). Currency rounding is done by `roundMoney` when it is given:
  * the orders collection passes the plugin's `roundMoney` option, and
- * `useEcommerce(payload).orders.calculateTotal` does the same for a total shown before the
+ * `getEcommerce(payload).orders.calculateTotal` does the same for a total shown before the
  * order exists. Without it the total is not rounded to a currency unit.
  */
 export const calculateOrderTotal = (parts: OrderTotalParts, roundMoney?: RoundMoney): number => {
