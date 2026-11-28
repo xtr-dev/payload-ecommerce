@@ -338,7 +338,7 @@ With `true` the task is only registered, not scheduled. With a `schedule` Payloa
 
 A coupon is applied by the plugin when an order is created with it. Pass the coupon's id as `coupon` (or its code as `orderData.couponCode` to `createOrderFromCart`); the orders collection then:
 
-1. Checks the coupon against the order: status `active`, within `validFrom`/`validUntil`, `usageCount` below `usageLimit`, the customer's earlier orders with this coupon (cancelled and refunded ones excluded) below `customerLimit` (only for orders with a `user`), `subtotal` at least `minPurchase`, and at least one order item matching `appliesToProducts` / `appliesToCategories` when those are set. A limit of 0 or an empty restriction means no limit.
+1. Checks the coupon against the order: status `active`, within `validFrom`/`validUntil`, `usageCount` below `usageLimit`, the customer's earlier orders with this coupon (cancelled and refunded ones excluded) below `customerLimit` (an order without a `user` cannot use a coupon that has a `customerLimit`), `subtotal` at least `minPurchase`, and at least one order item matching `appliesToProducts` / `appliesToCategories` when those are set. A limit of 0 or an empty restriction means no limit.
 2. Rejects the order with a validation error on `coupon` when a check fails.
 3. Sets `discount` — a percentage of the subtotal (capped by `maxDiscount`) or the fixed amount, rounded with [`roundMoney`](#money) and never more than the subtotal. A `discount` passed together with a coupon is ignored.
 4. Sets `shipping` to 0 for a `freeShipping` coupon (its `discount` is 0).
@@ -352,14 +352,30 @@ To show the effect before ordering, use `validateCoupon`, which runs the same ch
 const result = await ecommerce.coupons.validateCoupon({
   code: 'save10', // matched ignoring case; codes are stored in upper case
   cartTotal: 100, // subtotal before discount, tax and shipping
-  userId, // optional, for customerLimit
+  userId, // the signed-in customer; a coupon with a customerLimit is refused without it
   productIds, // needed for product-restricted coupons
   categoryIds, // needed for category-restricted coupons
 })
 // { valid: true, discount: 10, freeShipping: false, coupon }
 // { valid: true, discount: 0, freeShipping: true, coupon }   for a free shipping coupon
-// { valid: false, discount: 0, freeShipping: false, error: 'Coupon has expired' }
+// { valid: false, discount: 0, freeShipping: false, reason: 'expired', error: 'Coupon has expired', coupon }
 ```
+
+A refusal has a `reason` to word your own message from. `error` is an English description meant for logs.
+
+| `reason` | The coupon is refused because |
+| --- | --- |
+| `not_found` | no coupon has this code (the only refusal without `coupon`) |
+| `inactive` | its status is `inactive` |
+| `not_yet_valid` | `validFrom` is in the future |
+| `expired` | `validUntil` has passed, or its status is `expired` |
+| `usage_limit` | `usageCount` has reached `usageLimit` |
+| `customer_required` | it has a `customerLimit` and no `userId` was given, so the limit cannot be counted; ask the visitor to sign in |
+| `customer_limit` | the customer's orders with it have reached `customerLimit` |
+| `min_purchase` | `cartTotal` is below `minPurchase`; the result also has `minPurchase`, the stored amount, to format as your shop formats money |
+| `not_applicable` | it is restricted to products or categories and the cart has none of them |
+
+The checks run in this order and the first one that fails is reported. The types are exported as `ApplyCouponResult` and `CouponRefusalReason`. `coupon` is the whole coupon document, so pick the fields you need before sending a result to the browser.
 
 A restricted percentage or fixed coupon discounts the whole subtotal once a matching product is in the order, not only the matching lines.
 

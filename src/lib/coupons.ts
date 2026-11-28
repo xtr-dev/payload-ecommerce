@@ -14,13 +14,42 @@ export interface ValidateCouponParams {
   code: string
   /** Order subtotal before discount, tax and shipping. */
   cartTotal: number
-  /** Customer placing the order; needed to enforce the coupon's per-customer limit. */
+  /**
+   * Customer placing the order. A coupon with a `customerLimit` can only be used by a
+   * known customer, so without it such a coupon is refused with `customer_required`.
+   */
   userId?: DocumentId
   /** Products in the cart; needed for coupons restricted to products. */
   productIds?: DocumentId[]
   /** Categories of the products in the cart; needed for coupons restricted to categories. */
   categoryIds?: DocumentId[]
 }
+
+/**
+ * Why a coupon was refused, for code that words its own message or reacts to the cause:
+ *
+ * - `not_found`: no coupon has this code.
+ * - `inactive`: the coupon's status is `inactive`.
+ * - `not_yet_valid`: `validFrom` is in the future.
+ * - `expired`: `validUntil` has passed, or the coupon's status is `expired`.
+ * - `usage_limit`: `usageCount` has reached `usageLimit`.
+ * - `customer_required`: the coupon has a `customerLimit` and no customer was given, so
+ *   the limit cannot be checked. Ask the visitor to sign in.
+ * - `customer_limit`: the customer's orders with this coupon have reached `customerLimit`.
+ * - `min_purchase`: the subtotal is below `minPurchase` (also reported on the result).
+ * - `not_applicable`: the coupon is restricted to products or categories and the cart
+ *   has none of them.
+ */
+export type CouponRefusalReason =
+  | 'customer_limit'
+  | 'customer_required'
+  | 'expired'
+  | 'inactive'
+  | 'min_purchase'
+  | 'not_applicable'
+  | 'not_found'
+  | 'not_yet_valid'
+  | 'usage_limit'
 
 export interface ApplyCouponResult {
   valid: boolean
@@ -32,7 +61,22 @@ export interface ApplyCouponResult {
   discount: number
   /** True when the coupon is valid and of type `freeShipping`: the order ships for 0. */
   freeShipping: boolean
+  /**
+   * English description of the refusal, for logs. To show a customer a message, word it
+   * from `reason`.
+   */
   error?: string
+  /** Set exactly when `valid` is false. */
+  reason?: CouponRefusalReason
+  /**
+   * The coupon's minimum subtotal, as stored (in the shop's money unit). Only set when
+   * `reason` is `min_purchase`, so a message can name the amount in the shop's own format.
+   */
+  minPurchase?: number
+  /**
+   * The coupon document. Set when the coupon is valid, and on a refusal for every reason
+   * except `not_found`, so a refusal can be worded without looking the coupon up again.
+   */
   coupon?: any
 }
 
@@ -48,11 +92,17 @@ export interface EvaluateCouponParams extends Omit<ValidateCouponParams, 'code'>
  */
 export const RELEASED_ORDER_STATUSES = ['cancelled', 'refunded']
 
-const rejected = (error: string): ApplyCouponResult => ({
+const rejected = (
+  reason: CouponRefusalReason,
+  error: string,
+  details: Pick<ApplyCouponResult, 'coupon' | 'minPurchase'> = {},
+): ApplyCouponResult => ({
   valid: false,
   discount: 0,
   freeShipping: false,
   error,
+  reason,
+  ...details,
 })
 
 /**
@@ -64,11 +114,14 @@ const rejected = (error: string): ApplyCouponResult => ({
  *
  * Rules, in order: status must be `active`; now must be within `validFrom`/`validUntil`;
  * `usageCount` must be below `usageLimit`; the customer's orders with this coupon must be
- * below `customerLimit` (only checked when `userId` is given; cancelled and refunded orders
- * do not count); `cartTotal` must reach
+ * below `customerLimit` (cancelled and refunded orders do not count; without a `userId`
+ * the orders cannot be counted, so a coupon with a `customerLimit` is refused);
+ * `cartTotal` must reach
  * `minPurchase`; and when the coupon is restricted to products and/or categories, the
  * cart must contain at least one matching product for each restriction that is set.
  * A limit of 0 or an empty restriction means "no limit".
+ *
+ * A refusal carries the first rule that failed as `reason` (see `CouponRefusalReason`).
  *
  * A restricted percentage or fixed coupon still discounts the whole `cartTotal`, not only
  * the matching lines.
@@ -86,28 +139,42 @@ export const evaluateCoupon = async (
   }: EvaluateCouponParams,
 ): Promise<ApplyCouponResult> => {
   if (!coupon) {
-    return rejected('Coupon not found')
+    return rejected('not_found', 'Coupon not found')
+  }
+
+  // The coupons collection sets the status to `expired` when a coupon is saved after its
+  // `validUntil`, so that status is the same refusal as the date check below. The message
+  // is the one every non-active status has always had, for callers that match on it.
+  if (coupon.status === 'expired') {
+    return rejected('expired', 'Coupon is not active', { coupon })
   }
 
   if (coupon.status !== 'active') {
-    return rejected('Coupon is not active')
+    return rejected('inactive', 'Coupon is not active', { coupon })
   }
 
   const now = new Date()
 
   if (coupon.validFrom && new Date(coupon.validFrom) > now) {
-    return rejected('Coupon is not yet valid')
+    return rejected('not_yet_valid', 'Coupon is not yet valid', { coupon })
   }
 
   if (coupon.validUntil && new Date(coupon.validUntil) < now) {
-    return rejected('Coupon has expired')
+    return rejected('expired', 'Coupon has expired', { coupon })
   }
 
   if (coupon.usageLimit && (coupon.usageCount || 0) >= coupon.usageLimit) {
-    return rejected('Coupon usage limit reached')
+    return rejected('usage_limit', 'Coupon usage limit reached', { coupon })
   }
 
-  if (userId !== undefined && userId !== null && coupon.customerLimit) {
+  if (coupon.customerLimit) {
+    // A per-customer limit is counted over the customer's orders. A guest has no orders
+    // to count, so letting the coupon through would make the limit unlimited for anyone
+    // who is not signed in.
+    if (userId === undefined || userId === null) {
+      return rejected('customer_required', 'Coupon can only be used by a signed-in customer', { coupon })
+    }
+
     const { totalDocs } = await payload.count({
       collection: ordersSlug,
       // Counts all of the customer's orders, whoever is asking.
@@ -124,12 +191,15 @@ export const evaluateCoupon = async (
     })
 
     if (totalDocs >= coupon.customerLimit) {
-      return rejected('Customer usage limit reached')
+      return rejected('customer_limit', 'Customer usage limit reached', { coupon })
     }
   }
 
   if (coupon.minPurchase && cartTotal < coupon.minPurchase) {
-    return rejected(`Minimum purchase amount of ${coupon.minPurchase} required`)
+    return rejected('min_purchase', `Minimum purchase amount of ${coupon.minPurchase} required`, {
+      coupon,
+      minPurchase: coupon.minPurchase,
+    })
   }
 
   if (coupon.appliesToProducts && coupon.appliesToProducts.length > 0) {
@@ -138,7 +208,7 @@ export const evaluateCoupon = async (
     )
 
     if (!hasApplicableProduct) {
-      return rejected('Coupon does not apply to products in cart')
+      return rejected('not_applicable', 'Coupon does not apply to products in cart', { coupon })
     }
   }
 
@@ -148,7 +218,7 @@ export const evaluateCoupon = async (
     )
 
     if (!hasApplicableCategory) {
-      return rejected('Coupon does not apply to product categories in cart')
+      return rejected('not_applicable', 'Coupon does not apply to product categories in cart', { coupon })
     }
   }
 
