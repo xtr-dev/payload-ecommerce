@@ -369,7 +369,7 @@ With `true` the task is only registered, not scheduled. With a `schedule` Payloa
 A coupon is applied by the plugin when an order is created with it. Pass the coupon's id as `coupon` (or its code as `orderData.couponCode` to `createOrderFromCart`); the orders collection then:
 
 1. Checks the coupon against the order: status `active`, within `validFrom`/`validUntil`, `usageCount` below `usageLimit`, the customer's earlier orders with this coupon (cancelled and refunded ones excluded) below `customerLimit` (an order without a `user` cannot use a coupon that has a `customerLimit`), `subtotal` at least `minPurchase`, and at least one order item matching `appliesToProducts` / `appliesToCategories` when those are set. A limit of 0 or an empty restriction means no limit.
-2. Rejects the order with a validation error on `coupon` when a check fails.
+2. Rejects the order with a validation error on `coupon` when a check fails. The error carries the refusal's `reason` (see [When an order is rejected](#when-an-order-is-rejected)).
 3. Sets `discount` — a percentage of the subtotal (capped by `maxDiscount`) or the fixed amount, rounded with [`roundMoney`](#money) and never more than the subtotal. A `discount` passed together with a coupon is ignored.
 4. Sets `shipping` to 0 for a `freeShipping` coupon (its `discount` is 0).
 5. Increments the coupon's `usageCount`, and gives that use back when the order is cancelled or refunded (see "Inventory and Order Side Effects").
@@ -491,7 +491,7 @@ Products with `inventory.trackQuantity` have stock. A variant with its own `inve
 
 When an order is created (any status except `cancelled` / `refunded`):
 
-1. Stock is checked first. An order asking for more than is available is rejected with a validation error on `items` such as `Not enough stock for "Blue Shirt" (variant "M"): 3 requested, 1 available`. Lines for the same product are added up.
+1. Stock is checked first. An order asking for more than is available is rejected with a validation error on `items` such as `Not enough stock for "Blue Shirt" (variant "M"): 3 requested, 1 available`. Lines for the same product are added up. The error also carries the product, variant and quantities as data (see [When an order is rejected](#when-an-order-is-rejected)).
 2. Stock is reduced and the coupon's `usageCount` is incremented, each with one conditional database statement, so concurrent orders cannot oversell the last units or take a coupon past its `usageLimit`. The order that loses such a race is rejected.
 3. The `afterCreateOrder` hook runs.
 
@@ -504,6 +504,37 @@ Limits:
 - The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock, coupon usage or order flag columns have custom database names, the plugin falls back to read-then-write, which can oversell or restore twice under concurrency. It logs a warning the first time that happens (`[payload-ecommerce] No atomic … update …`), because the statements use parts of the adapters that are not public API. The plugin's tests assert that the atomic statements are used on SQLite and MongoDB on Payload 3.37 and 3.94; if you see the warning after a Payload upgrade, please open an issue.
 - On MongoDB, concurrent orders in transactions that touch the same product can fail with MongoDB's transient "write conflict" error even when enough stock is left. Nothing is oversold; retry the order.
 - Simultaneous updates of the same order are otherwise handled by Payload and the database, not by the plugin: without transactions (the SQLite adapter's default) Payload can reject all but one of them, and an edit that was read before a cancellation and written after it can put the old status back. In both cases the order's stock and coupon use are still given back at most once, and an order left open that way still holds them.
+
+### When an order is rejected
+
+An order that is refused for its stock or its coupon fails with an `OrderRejectedError`, whether it was created with `createOrderFromCart`, the Local API, REST or the admin panel. It is a Payload `ValidationError` (HTTP 400, reported on `items` or `coupon`) whose `message` is the English reason, and it carries the cause as data, so you do not have to match on the text. `getOrderRejection(error)` returns that cause, or `undefined` for any other error:
+
+```typescript
+import { getOrderRejection } from '@xtr-dev/payload-ecommerce'
+
+try {
+  order = await ecommerce.orders.createOrderFromCart({ cartId, orderData })
+} catch (error) {
+  const rejection = getOrderRejection(error)
+  if (!rejection) throw error // not a refusal: a missing address, a failing hook, the database
+
+  if (rejection.type === 'stock') {
+    // { type: 'stock', reason: 'out_of_stock', product, variant?, requested, available? }
+    return { error: 'Some items in your cart are sold out', product: rejection.product }
+  }
+  // { type: 'coupon', reason: CouponRefusalReason, minPurchase? }
+  return { error: couponMessages[rejection.reason] }
+}
+```
+
+| `type` | `reason` | Other fields |
+| --- | --- | --- |
+| `stock` | `out_of_stock` | `product`: id of the product that is short. `variant`: the variant's name, when the variant has its own stock number and that is what is short. `requested`: units the order asks for, added up over its lines for that stock. `available`: units in stock when the order was checked |
+| `coupon` | a [`CouponRefusalReason`](#coupons-1), the same value `validateCoupon` gives | `minPurchase` when the reason is `min_purchase` |
+
+`available` is absent when the order passed the stock check and then lost the last units to a simultaneous order, because the number it read is out of date by then; read the product again if you want to show one. A coupon whose last use was taken the same way is rejected with `usage_limit`. `createOrderFromCart` with a `couponCode` that no coupon has is rejected with `not_found`.
+
+The same object is on the error as `error.rejection` and `error.data.rejection`. Payload sends `data` in REST and GraphQL error responses, so a client of those can pass `errors[0]` of the response body to `getOrderRejection`. The types are exported as `OrderRejection`, `StockOrderRejection` and `CouponOrderRejection`, and the class as `OrderRejectedError`. `getOrderRejection` is the safer check of the two: `instanceof` fails when a bundler ends up with two copies of the plugin.
 
 The helpers `ecommerce.products.checkInventory`, `reduceInventory` (throws when stock is short) and `restoreInventory`, and `ecommerce.coupons.incrementCouponUsage` / `decrementCouponUsage` use the same atomic statements, for stock movements that are not orders. They take an optional `{ req }` as last argument to run inside a transaction.
 

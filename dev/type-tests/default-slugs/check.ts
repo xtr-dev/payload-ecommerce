@@ -1,10 +1,15 @@
 // Compiled by `pnpm test:types` against the built declarations in dist, as a host that
 // has generated Payload types (dev/payload-types.ts) and uses the plugin's default slugs.
 // Nothing here runs; the file passes when it compiles.
-import type { ApplyCouponResult, EcommerceHelpers } from '@xtr-dev/payload-ecommerce'
+import type {
+  ApplyCouponResult,
+  CouponRefusalReason,
+  DocumentId,
+  EcommerceHelpers,
+} from '@xtr-dev/payload-ecommerce'
 import type { PaginatedDocs, Payload } from 'payload'
 
-import { getEcommerce, useEcommerce } from '@xtr-dev/payload-ecommerce'
+import { getEcommerce, getOrderRejection, useEcommerce } from '@xtr-dev/payload-ecommerce'
 
 import type { Cart, Coupon, Order, Product } from '../../payload-types.js'
 
@@ -66,3 +71,22 @@ interface ExtendedOrder extends Order {
 const extended = getEcommerce<{ orders: ExtendedOrder }>(payload)
 expectTrue<Equal<Result<typeof extended.orders.getOrder>, ExtendedOrder>>()
 expectTrue<Equal<Result<typeof extended.cart.getCart>, Cart | null>>()
+
+export const orderRejection = (error: unknown): void => {
+  const rejection = getOrderRejection(error)
+  if (!rejection) {
+    return
+  }
+
+  // `reason` can be switched on without looking at `type` first.
+  expectTrue<Equal<typeof rejection.reason, 'out_of_stock' | CouponRefusalReason>>()
+
+  if (rejection.type === 'stock') {
+    expectTrue<Equal<typeof rejection.product, DocumentId>>()
+    expectTrue<Equal<typeof rejection.available, number | undefined>>()
+    expectTrue<Equal<typeof rejection.variant, string | undefined>>()
+  } else {
+    expectTrue<Equal<typeof rejection.reason, CouponRefusalReason>>()
+    expectTrue<Equal<typeof rejection.minPurchase, number | undefined>>()
+  }
+}

@@ -23,6 +23,8 @@ import {
   slugify,
   toDocumentId,
   getEcommerce,
+  getOrderRejection,
+  OrderRejectedError,
   useEcommerce,
 } from '../src/index.js'
 
@@ -551,25 +553,40 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     test.each([
-      { name: 'an inactive coupon', data: { status: 'inactive' }, error: 'not active' },
+      { name: 'an inactive coupon', data: { status: 'inactive' }, error: 'not active', reason: 'inactive' },
       {
         name: 'a coupon that is not valid yet',
         data: { validFrom: new Date(Date.now() + 86_400_000).toISOString() },
         error: 'not yet valid',
+        reason: 'not_yet_valid',
       },
       {
         name: 'a coupon past its end date',
         // The coupons collection marks such a coupon expired when it is saved.
         data: { validUntil: new Date(Date.now() - 86_400_000).toISOString() },
         error: 'not active',
+        reason: 'expired',
       },
       {
         name: 'a coupon whose usage limit is reached',
         data: { usageCount: 3, usageLimit: 3 },
         error: 'usage limit reached',
+        reason: 'usage_limit',
       },
-      { name: 'a cart below the minimum purchase', data: { minPurchase: 500 }, error: 'Minimum purchase' },
-    ])('an order with $name is rejected', async ({ data, error, name }) => {
+      {
+        name: 'a cart below the minimum purchase',
+        data: { minPurchase: 500 },
+        error: 'Minimum purchase',
+        reason: 'min_purchase',
+        details: { minPurchase: 500 },
+      },
+      {
+        name: 'a coupon with a customer limit and no customer',
+        data: { customerLimit: 1 },
+        error: 'signed-in customer',
+        reason: 'customer_required',
+      },
+    ])('an order with $name is rejected and the error says why', async ({ data, details, error, name, reason }) => {
       const product = await createProduct(`Rejected Coupon Product ${name}`, 50)
       const coupon = await payload.create({
         collection: 'coupons',
@@ -582,10 +599,39 @@ describe('Ecommerce Plugin integration tests', () => {
         },
       })
 
-      await expect(createOrderWith(product, { coupon: coupon.id })).rejects.toMatchObject({
+      const rejection = await createOrderWith(product, { coupon: coupon.id }).catch((thrown) => thrown)
+
+      expect(rejection).toMatchObject({
         data: { errors: [{ message: expect.stringContaining(error), path: 'coupon' }] },
         name: 'ValidationError',
       })
+      expect(rejection).toBeInstanceOf(OrderRejectedError)
+      expect(rejection.message).toContain(error)
+      expect(getOrderRejection(rejection)).toEqual({ type: 'coupon', reason, ...details })
+    })
+
+    test('an order with a coupon that does not exist is rejected with reason not_found', async () => {
+      const product = await createProduct('Missing Coupon Product', 50)
+      const coupon = await payload.create({
+        collection: 'coupons',
+        data: { code: 'DELETEDBEFOREUSE', status: 'active', type: 'fixed', value: 5 },
+      })
+      await payload.delete({ id: coupon.id, collection: 'coupons' })
+
+      const rejection = await createOrderWith(product, { coupon: coupon.id }).catch((thrown) => thrown)
+
+      expect(getOrderRejection(rejection)).toEqual({ type: 'coupon', reason: 'not_found' })
+    })
+
+    test('getOrderRejection returns undefined for anything that is not an order rejection', () => {
+      expect(getOrderRejection(new Error('Not enough stock for "Lookalike"'))).toBeUndefined()
+      expect(getOrderRejection(undefined)).toBeUndefined()
+      expect(getOrderRejection('Coupon has expired')).toBeUndefined()
+      expect(getOrderRejection({ data: { rejection: { type: 'other', reason: 'x' } } })).toBeUndefined()
+      // The shape of one entry of a REST error response's `errors` array.
+      expect(
+        getOrderRejection({ data: { rejection: { type: 'coupon', reason: 'expired' } }, name: 'ValidationError' }),
+      ).toEqual({ type: 'coupon', reason: 'expired' })
     })
 
     test('usage limit is enforced while the coupon is still active', async () => {
@@ -766,7 +812,12 @@ describe('Ecommerce Plugin integration tests', () => {
           cartId: secondCart.id,
           orderData: { couponCode: 'DOESNOTEXIST', shippingAddress: address },
         }),
-      ).rejects.toThrow('Coupon not found')
+      ).rejects.toSatisfy(
+        (thrown: any) =>
+          thrown.message === 'Coupon not found: DOESNOTEXIST' &&
+          thrown.data.errors[0].path === 'coupon' &&
+          getOrderRejection(thrown)?.reason === 'not_found',
+      )
       // A rejected order leaves the cart as it was.
       const cartAfter = await payload.findByID({ id: secondCart.id, collection: 'carts' })
       expect(cartAfter.items).toHaveLength(1)
@@ -858,6 +909,53 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(await ordersContaining(scarce)).toBe(0)
     })
 
+    test('a stock rejection names the product, the units requested and the units available', async () => {
+      const scarce = await createProduct('Stock Reason Product', tracked(2))
+
+      const rejection = await createOrder([
+        { product: scarce, quantity: 2 },
+        { product: scarce, quantity: 1 },
+      ]).catch((thrown) => thrown)
+
+      expect(rejection).toBeInstanceOf(OrderRejectedError)
+      expect(rejection.rejection).toEqual(getOrderRejection(rejection))
+      expect(getOrderRejection(rejection)).toEqual({
+        type: 'stock',
+        reason: 'out_of_stock',
+        product: scarce.id,
+        requested: 3,
+        available: 2,
+      })
+    })
+
+    test('a stock rejection names the variant only when the variant has its own stock', async () => {
+      const product = await createProduct('Stock Reason Variant Product', {
+        ...tracked(1),
+        variants: [{ name: 'Small', inventory: 0 }, { name: 'Shared' }],
+      })
+
+      const ownStock = await createOrder([{ product, quantity: 1, variant: 'Small' }]).catch((thrown) => thrown)
+      expect(getOrderRejection(ownStock)).toEqual({
+        type: 'stock',
+        reason: 'out_of_stock',
+        product: product.id,
+        variant: 'Small',
+        requested: 1,
+        available: 0,
+      })
+
+      const sharedStock = await createOrder([{ product, quantity: 2, variant: 'Shared' }]).catch(
+        (thrown) => thrown,
+      )
+      expect(getOrderRejection(sharedStock)).toEqual({
+        type: 'stock',
+        reason: 'out_of_stock',
+        product: product.id,
+        requested: 2,
+        available: 1,
+      })
+    })
+
     test('two lines for the same product are checked together', async () => {
       const product = await createProduct('Stock Split Lines Product', tracked(3))
 
@@ -926,6 +1024,14 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(rejected.reason.data.errors[0].message).toContain(
         'Not enough stock for "Stock Last Unit Product"',
       )
+      // Whether the loser failed the first check or lost the conditional update depends on
+      // timing; only in the first case is there a current `available` to report.
+      expect(getOrderRejection(rejected.reason)).toMatchObject({
+        type: 'stock',
+        reason: 'out_of_stock',
+        product: product.id,
+        requested: 1,
+      })
       expect(await stockOf(product)).toBe(0)
       // The losing order is not left behind.
       expect(await ordersContaining(product)).toBe(1)
@@ -979,6 +1085,11 @@ describe('Ecommerce Plugin integration tests', () => {
       ])
 
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          expect(getOrderRejection(result.reason)).toEqual({ type: 'coupon', reason: 'usage_limit' })
+        }
+      }
       const couponAfter = await payload.findByID({ id: coupon.id, collection: 'coupons' })
       expect(couponAfter.usageCount).toBe(1)
       // The rejected orders gave their stock back and were removed.
@@ -2317,6 +2428,37 @@ describe('Ecommerce Plugin integration tests', () => {
     })
 
     describe('REST API', () => {
+      test('a rejected order answers 400 with the rejection in the error data', async () => {
+        const soldOut = await payload.create({
+          collection: 'products',
+          data: {
+            inventory: { quantity: 0, trackQuantity: true },
+            price: 10,
+            status: 'active',
+            title: `Access Sold Out ${run}`,
+          },
+        })
+
+        const response = await rest('POST', 'orders', {
+          body: {
+            items: [{ price: 10, product: soldOut.id, quantity: 1, total: 10 }],
+            shippingAddress: address,
+            subtotal: 10,
+          },
+          user: admin,
+        })
+
+        expect(response.status).toBe(400)
+        expect(response.json.errors[0].name).toBe('ValidationError')
+        expect(getOrderRejection(response.json.errors[0])).toEqual({
+          type: 'stock',
+          reason: 'out_of_stock',
+          product: soldOut.id,
+          requested: 1,
+          available: 0,
+        })
+      })
+
       test('anonymous visitors get active products, and nothing from coupons, orders and carts', async () => {
         const products = await rest('GET', 'products?limit=1000')
         expect(products.status).toBe(200)
