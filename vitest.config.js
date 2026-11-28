@@ -4,7 +4,7 @@ import path from 'path'
 import { loadEnv } from 'payload/node'
 import { fileURLToPath } from 'url'
 import tsconfigPaths from 'vite-tsconfig-paths'
-import { configDefaults, defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -35,14 +35,14 @@ export default defineConfig(() => {
     test: {
       env: {
         ...(databaseDirectory ? { DATABASE_URI: `file:${path.join(databaseDirectory, 'payload.db')}` } : {}),
-        // The dev seed downloads product images from picsum.photos; tests must not need the network.
+        // The dev seed draws a picture for every product; storing twenty uploads would slow
+        // every run down and no test looks at them.
         SEED_SKIP_IMAGES: 'true',
       },
+      // `pnpm test:coverage` reports on the plugin itself, not on the demo around it.
+      coverage: { include: ['src/**'], reporter: ['text'] },
       environment: 'node',
       globalSetup: useMongoDB ? ['./dev/helpers/mongoGlobalSetup.ts'] : [],
-      // e2e.spec.ts is a Playwright suite (run by playwright.config.js); importing
-      // @playwright/test inside vitest throws at collection time
-      exclude: [...configDefaults.exclude, 'dev/e2e.spec.ts'],
       hookTimeout: 30_000,
       testTimeout: 30_000,
     },

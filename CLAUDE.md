@@ -24,7 +24,7 @@ pnpm lint             # Run ESLint
 pnpm test             # Integration tests (vitest run) on SQLite
 pnpm test:mongo       # Same tests on an in-memory MongoDB replica set
 pnpm test:pack        # Build, pack and import every published export
-pnpm test:e2e         # Playwright tests against the demo (not in CI)
+pnpm test:coverage    # Integration tests with a coverage report for src/
 pnpm dev:generate-types    # Regenerate Payload types
 ```
 
@@ -142,5 +142,7 @@ billingPlugin({
 ## Tests
 
 Integration tests are in `dev/int.spec.ts` (default slugs) and `dev/renamed.spec.ts` (every collection renamed, own database). `pnpm test` runs them against a temporary SQLite database (numeric ids, no transactions) and `pnpm test:mongo` against an in-memory MongoDB replica set (string ids, transactions); CI runs both, so a test must not assume an id type. For operations started at the same time, use the `settleConcurrently` helper in that file: it retries MongoDB's transient write conflicts. Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.
+
+There are no browser tests. The demo's storefront flow is covered in `dev/int.spec.ts` ("demo storefront routes") by calling the route handlers in `dev/app/api` directly. The dev seed draws its product pictures locally (`dev/seed-data/placeholderImage.ts`) and must not use the network.
 
 The spec files are not type-checked. The types of the helper results are tested in `dev/type-tests/`: each directory is a host program (generated types with default slugs, generated types with renamed slugs) compiled against `dist/*.d.ts` by `pnpm test:types`. The helper signatures in `src/lib` are written out as interfaces (`CartHelpers`, ...) because an inferred return type would be resolved when the plugin is built, before the host's generated types exist.

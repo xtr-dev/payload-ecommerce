@@ -12,7 +12,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 15,
     lowStockThreshold: 5,
-    imageUrl: 'https://picsum.photos/seed/macbook-pro/800/600',
     variants: [
       { name: 'M2 Pro / 512GB', sku: 'MBP-16-M2P-512', price: 2499, quantity: 8 },
       { name: 'M2 Max / 1TB', sku: 'MBP-16-M2M-1TB', price: 3499, quantity: 7 },
@@ -31,7 +30,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 50,
     lowStockThreshold: 10,
-    imageUrl: 'https://picsum.photos/seed/iphone-15-pro/800/600',
     variants: [
       { name: '128GB - Natural Titanium', sku: 'IP15-PRO-128-NT', price: 999, quantity: 15 },
       { name: '256GB - Natural Titanium', sku: 'IP15-PRO-256-NT', price: 1099, quantity: 15 },
@@ -50,7 +48,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 30,
     lowStockThreshold: 8,
-    imageUrl: 'https://picsum.photos/seed/ipad-air/800/600',
   },
   // Electronics - Accessories
   {
@@ -64,7 +61,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 100,
     lowStockThreshold: 20,
-    imageUrl: 'https://picsum.photos/seed/airpods-pro/800/600',
   },
   {
     title: 'Magic Keyboard',
@@ -77,7 +73,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 45,
     lowStockThreshold: 10,
-    imageUrl: 'https://picsum.photos/seed/magic-keyboard/800/600',
   },
   {
     title: 'USB-C Hub',
@@ -91,7 +86,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 80,
     lowStockThreshold: 15,
-    imageUrl: 'https://picsum.photos/seed/usb-c-hub/800/600',
   },
   // Clothing - Men
   {
@@ -105,7 +99,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 200,
     lowStockThreshold: 30,
-    imageUrl: 'https://picsum.photos/seed/white-tshirt/800/600',
     variants: [
       { name: 'Small', sku: 'TSHIRT-WHT-S', quantity: 50 },
       { name: 'Medium', sku: 'TSHIRT-WHT-M', quantity: 60 },
@@ -124,7 +117,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 120,
     lowStockThreshold: 20,
-    imageUrl: 'https://picsum.photos/seed/slim-jeans/800/600',
     variants: [
       { name: '30 - Blue', sku: 'JEANS-SLIM-30-BLU', quantity: 20 },
       { name: '32 - Blue', sku: 'JEANS-SLIM-32-BLU', quantity: 30 },
@@ -144,7 +136,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 150,
     lowStockThreshold: 25,
-    imageUrl: 'https://picsum.photos/seed/hooded-sweatshirt/800/600',
     variants: [
       { name: 'S - Gray', sku: 'HOODIE-S-GRY', quantity: 25 },
       { name: 'M - Gray', sku: 'HOODIE-M-GRY', quantity: 35 },
@@ -164,7 +155,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 90,
     lowStockThreshold: 15,
-    imageUrl: 'https://picsum.photos/seed/running-shoes/800/600',
     variants: [
       { name: 'Size 8', sku: 'SHOES-RUN-8', quantity: 15 },
       { name: 'Size 9', sku: 'SHOES-RUN-9', quantity: 20 },
@@ -184,7 +174,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 30,
     lowStockThreshold: 5,
-    imageUrl: 'https://picsum.photos/seed/leather-jacket/800/600',
     variants: [
       { name: 'Small', sku: 'JACKET-LTH-S', quantity: 8 },
       { name: 'Medium', sku: 'JACKET-LTH-M', quantity: 10 },
@@ -204,7 +193,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 60,
     lowStockThreshold: 10,
-    imageUrl: 'https://picsum.photos/seed/summer-dress/800/600',
     variants: [
       { name: 'XS - Floral', sku: 'DRESS-SUM-XS-FLR', quantity: 10 },
       { name: 'S - Floral', sku: 'DRESS-SUM-S-FLR', quantity: 15 },
@@ -225,7 +213,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 25,
     lowStockThreshold: 5,
-    imageUrl: 'https://picsum.photos/seed/office-chair/800/600',
   },
   {
     title: 'Standing Desk',
@@ -238,7 +225,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 15,
     lowStockThreshold: 3,
-    imageUrl: 'https://picsum.photos/seed/standing-desk/800/600',
   },
   {
     title: 'Bookshelf',
@@ -251,7 +237,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 20,
     lowStockThreshold: 5,
-    imageUrl: 'https://picsum.photos/seed/bookshelf/800/600',
   },
   // Home & Garden - Decor
   {
@@ -265,7 +250,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 50,
     lowStockThreshold: 10,
-    imageUrl: 'https://picsum.photos/seed/table-lamp/800/600',
   },
   {
     title: 'Throw Pillow Set',
@@ -278,7 +262,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 75,
     lowStockThreshold: 15,
-    imageUrl: 'https://picsum.photos/seed/throw-pillows/800/600',
   },
   {
     title: 'Wall Art Canvas',
@@ -291,7 +274,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 40,
     lowStockThreshold: 8,
-    imageUrl: 'https://picsum.photos/seed/wall-art/800/600',
   },
   {
     title: 'Plant Pot Set',
@@ -304,7 +286,6 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 90,
     lowStockThreshold: 20,
-    imageUrl: 'https://picsum.photos/seed/plant-pots/800/600',
   },
   {
     title: 'Area Rug',
@@ -317,6 +298,5 @@ export const productsSeedData = [
     trackQuantity: true,
     quantity: 30,
     lowStockThreshold: 5,
-    imageUrl: 'https://picsum.photos/seed/area-rug/800/600',
   },
 ];
