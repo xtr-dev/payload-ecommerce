@@ -14,6 +14,11 @@ export interface GetProductsParams {
   status?: 'draft' | 'active' | 'archived'
   minPrice?: number
   maxPrice?: number
+  /**
+   * Text to look for in the product's title and SKU (case-insensitive, anywhere in the
+   * value). The description is searched as well on databases that can match text inside a
+   * rich text value; Postgres cannot, see `getProducts`.
+   */
   search?: string
   limit?: number
   page?: number
@@ -162,23 +167,16 @@ export const createProductHelpers = <TProduct = UntypedDocument>(
     }
 
     if (search) {
-      where.or = [
-        {
-          title: {
-            contains: search,
-          },
-        },
-        {
-          description: {
-            contains: search,
-          },
-        },
-        {
-          sku: {
-            contains: search,
-          },
-        },
-      ]
+      where.or = [{ title: { contains: search } }, { sku: { contains: search } }]
+
+      // The description is a rich text field. Postgres stores it as jsonb, which has no
+      // "contains text" operator: with the description in the query the database rejects
+      // the whole statement ("operator does not exist: jsonb ~~* unknown") and every search
+      // fails. So on Postgres the search covers the title and the SKU only. Other adapters
+      // keep matching the description as stored (SQLite keeps it as JSON text).
+      if (payload.db.name !== 'postgres') {
+        where.or.push({ description: { contains: search } })
+      }
     }
 
     return await payload.find({
