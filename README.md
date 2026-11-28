@@ -184,6 +184,36 @@ import { getRelationshipId } from '@xtr-dev/payload-ecommerce'
 const productIds = cart.items.map((item) => getRelationshipId(item.product))
 ```
 
+### Typed results
+
+With [generated types](https://payloadcms.com/docs/typescript/generating-types) and the default collection slugs, the helpers return your generated document types without casts:
+
+```typescript
+const cart = await ecommerce.cart.getCart(user.id) // Cart | null
+const order = await ecommerce.orders.createOrderFromCart({ cartId, orderData }) // Order
+const { docs } = await ecommerce.products.getProducts() // Product[]
+
+const result = await ecommerce.coupons.validateCoupon({ code, cartTotal })
+if (result.valid) {
+  result.coupon // Coupon
+} else {
+  result.reason // CouponRefusalReason
+  result.coupon // Coupon | undefined
+}
+```
+
+The types are those of your collections named `carts`, `coupons`, `orders` and `products`. If you renamed a collection, name its type yourself; collections you leave out keep the default:
+
+```typescript
+import type { ShopCart, ShopOrder } from './payload-types'
+
+const ecommerce = getEcommerce<{ carts: ShopCart; orders: ShopOrder }>(payload)
+```
+
+Do the same when one of those four slugs belongs to a collection of your own that is not the plugin's, because the default would be that collection's type. Without generated types, and for a renamed collection without a type argument, documents are untyped (`JsonObject & TypeWithID`).
+
+`getCart` and `findCouponByCode` return `null` when there is nothing to find. `getOrder` and `getProduct` throw Payload's `NotFound` instead. The helper types are exported as `EcommerceHelpers`, `CartHelpers`, `OrderHelpers`, `CouponHelpers`, `ProductHelpers` and `ApplyCouponResult`; each takes the document type as a type argument.
+
 ### Helpers and access control
 
 `getEcommerce(payload)` bypasses the collections' access rules (`overrideAccess: true`). That is what a storefront needs for guest carts and for creating orders, and it means your server code decides whose cart or order is touched: only pass ids (`userId`, `sessionId`, `cartId`, `orderId`) that belong to the visitor, for example a session id read from your own cookie.
@@ -495,7 +525,7 @@ pnpm dev
 pnpm build
 
 # Checks run by CI and before a release
-pnpm typecheck
+pnpm typecheck   # src, then the helper result types against the built declarations (dev/type-tests)
 pnpm lint
 pnpm test        # integration tests (vitest) on a temporary SQLite database
 pnpm test:mongo  # the same tests on an in-memory MongoDB replica set

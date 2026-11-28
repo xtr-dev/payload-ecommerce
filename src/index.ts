@@ -30,7 +30,18 @@ export { toDocumentId } from './lib/ids.js'
 export { getRoundMoney, roundToTwoDecimals } from './lib/money.js'
 export type { RoundMoney } from './lib/money.js'
 export type { OrderAddress } from './lib/orders.js'
-export type { ApplyCouponResult, CouponRefusalReason, ValidateCouponParams } from './lib/coupons.js'
+export type {
+  AcceptedCouponResult,
+  ApplyCouponResult,
+  CouponHelpers,
+  CouponRefusalReason,
+  RefusedCouponResult,
+  ValidateCouponParams,
+} from './lib/coupons.js'
+export type { EcommerceDocument, EcommerceDocumentTypes, UntypedDocument } from './lib/documents.js'
+export type { CartHelpers } from './lib/cart.js'
+export type { OrderHelpers } from './lib/orders.js'
+export type { ProductHelpers } from './lib/products.js'
 export { isSameCartLine } from './lib/cart.js'
 export { getRelationshipId, isSameDocument } from './lib/relationships.js'
 export type { DocumentId } from './lib/relationships.js'

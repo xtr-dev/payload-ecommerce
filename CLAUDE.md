@@ -18,7 +18,8 @@ This file provides guidance to Claude Code when working in the @xtr-dev/payload-
 ```bash
 pnpm dev              # Start dev server (Next.js app in dev/)
 pnpm build            # Build for production
-pnpm typecheck        # tsc --noEmit over src/
+pnpm typecheck        # tsc --noEmit over src/, then pnpm test:types
+pnpm test:types       # Compile dev/type-tests against the built declarations in dist
 pnpm lint             # Run ESLint
 pnpm test             # Integration tests (vitest run) on SQLite
 pnpm test:mongo       # Same tests on an in-memory MongoDB replica set
@@ -103,6 +104,7 @@ Payload fills `data` with the stored value of fields an update leaves out before
 | `src/collections/Categories.ts` | Product categories |
 | `src/collections/Coupons.ts` | Discount codes |
 | `src/lib/getEcommerce.ts` | Server helpers (`cart`, `orders`, `coupons`, `products`) |
+| `src/lib/documents.ts` | Document types of the helper results (generated types or type arguments) |
 | `src/lib/slugs.ts` | Resolved collection slugs (`getEcommerceSlugs`) |
 | `dev/payload.config.ts` | Development configuration |
 
@@ -138,3 +140,5 @@ billingPlugin({
 ## Tests
 
 Integration tests are in `dev/int.spec.ts` (default slugs) and `dev/renamed.spec.ts` (every collection renamed, own database). `pnpm test` runs them against a temporary SQLite database (numeric ids, no transactions) and `pnpm test:mongo` against an in-memory MongoDB replica set (string ids, transactions); CI runs both, so a test must not assume an id type. For operations started at the same time, use the `settleConcurrently` helper in that file: it retries MongoDB's transient write conflicts. Use `getRelationshipId` / `isSameDocument` from `src/lib/relationships.ts` when comparing ids.
+
+The spec files are not type-checked. The types of the helper results are tested in `dev/type-tests/`: each directory is a host program (generated types with default slugs, generated types with renamed slugs) compiled against `dist/*.d.ts` by `pnpm test:types`. The helper signatures in `src/lib` are written out as interfaces (`CartHelpers`, ...) because an inferred return type would be resolved when the plugin is built, before the host's generated types exist.

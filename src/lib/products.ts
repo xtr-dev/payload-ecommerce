@@ -1,6 +1,7 @@
-import type { Payload, PayloadRequest } from 'payload'
+import type { PaginatedDocs, Payload, PayloadRequest } from 'payload'
 
 import type { HelperAccessOptions } from './access.js'
+import type { UntypedDocument } from './documents.js'
 import type { DocumentId } from './relationships.js'
 import type { EcommerceSlugs } from './slugs.js'
 
@@ -74,11 +75,51 @@ export const describeStockShortage = (
   return `Not enough stock for ${name}${variantPart}: ${requested} requested${availablePart}`
 }
 
-export const createProductHelpers = (
+/** The helpers of `getEcommerce(payload).products`. `TProduct` is the type of a product document. */
+export interface ProductHelpers<TProduct = UntypedDocument> {
+  /**
+   * Tells whether `quantity` units can be ordered, and how many are in stock (`Infinity`
+   * for a product that does not track its quantity). This is a read, so two concurrent
+   * callers can both be told "available" for the last unit; `reduceInventory` decides.
+   */
+  checkInventory: (
+    productId: DocumentId,
+    quantity: number,
+    variant?: string,
+    options?: InventoryOptions,
+  ) => Promise<{ available: boolean; quantity: number }>
+  /** Returns the product with its relationships populated (depth 2). Throws when it does not exist. */
+  getProduct: (id: DocumentId) => Promise<TProduct>
+  /** Returns a page of products; only `active` ones unless `status` is given. */
+  getProducts: (params?: GetProductsParams) => Promise<PaginatedDocs<TProduct>>
+  /**
+   * Takes `quantity` units out of stock in one atomic step and returns the product.
+   * Throws when fewer units are left, leaving the stock untouched. Does nothing for a
+   * product that does not track its quantity.
+   */
+  reduceInventory: (
+    productId: DocumentId,
+    quantity: number,
+    variant?: string,
+    options?: InventoryOptions,
+  ) => Promise<TProduct>
+  /**
+   * Puts `quantity` units back in stock in one atomic step and returns the product. Does
+   * nothing for a product that does not track its quantity.
+   */
+  restoreInventory: (
+    productId: DocumentId,
+    quantity: number,
+    variant?: string,
+    options?: InventoryOptions,
+  ) => Promise<TProduct>
+}
+
+export const createProductHelpers = <TProduct = UntypedDocument>(
   payload: Payload,
   slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
-) => {
+): ProductHelpers<TProduct> => {
   const productsSlug = slugs.products
   /** A product id in the type the products collection stores, also when it arrived as text. */
   const productIdOf = (id: DocumentId): DocumentId => toDocumentId(payload, productsSlug, id)
@@ -244,11 +285,16 @@ export const createProductHelpers = (
     return await loadProduct(productId, options.req)
   }
 
-  return {
+  const helpers: ProductHelpers = {
     getProduct,
     getProducts,
     checkInventory,
     reduceInventory,
     restoreInventory,
   }
+
+  // The Local API only knows the products slug as a string, so it returns untyped documents.
+  // The object above is checked against the helper signatures with that untyped
+  // document; which document type the collection really has is the caller's word.
+  return helpers as unknown as ProductHelpers<TProduct>
 }

@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "noEmit": true,
+    "paths": {
+      "@xtr-dev/payload-ecommerce": ["../../../dist/index.d.ts"]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": []
+  },
+  "files": ["check.ts", "../../payload-types.ts"]
+}

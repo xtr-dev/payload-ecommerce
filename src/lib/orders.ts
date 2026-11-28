@@ -1,6 +1,7 @@
-import type { Payload } from 'payload'
+import type { PaginatedDocs, Payload } from 'payload'
 
 import type { HelperAccessOptions } from './access.js'
+import type { UntypedDocument } from './documents.js'
 import type { DocumentId } from './relationships.js'
 import type { EcommerceSlugs } from './slugs.js'
 import type { OrderTotalParts } from './totals.js'
@@ -68,11 +69,32 @@ export interface UpdateOrderStatusParams {
   trackingUrl?: string
 }
 
-export const createOrderHelpers = (
+/** The helpers of `getEcommerce(payload).orders`. `TOrder` is the type of an order document. */
+export interface OrderHelpers<TOrder = UntypedDocument> {
+  /**
+   * The total an order with these amounts will get: subtotal − discount + tax + shipping,
+   * never negative, rounded with the plugin's `roundMoney` option. Use it to show a total
+   * before the order exists, for example on a cart or checkout page.
+   */
+  calculateTotal: (parts: OrderTotalParts) => number
+  /**
+   * Creates an order from a cart and empties the cart. Throws when the cart is missing,
+   * expired or empty, and when the orders collection rejects the order (stock, coupon).
+   */
+  createOrderFromCart: (params: CreateOrderFromCartParams) => Promise<TOrder>
+  /** Returns the order with its relationships populated (depth 2). Throws when it does not exist. */
+  getOrder: (orderId: DocumentId) => Promise<TOrder>
+  /** Returns a page of the customer's orders, newest first, with relationships populated (depth 2). */
+  getUserOrders: (userId: DocumentId) => Promise<PaginatedDocs<TOrder>>
+  /** Sets the order's status and, when given, its tracking number and URL. */
+  updateOrderStatus: (params: UpdateOrderStatusParams) => Promise<TOrder>
+}
+
+export const createOrderHelpers = <TOrder = UntypedDocument>(
   payload: Payload,
   slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
-) => {
+): OrderHelpers<TOrder> => {
   const { carts: cartsSlug, orders: ordersSlug, products: productsSlug } = slugs
   const { caller, trusted } = resolveLocalApiAccess(accessOptions)
 
@@ -266,11 +288,16 @@ export const createOrderHelpers = (
   const calculateTotal = (parts: OrderTotalParts): number =>
     calculateOrderTotal(parts, getRoundMoney(payload))
 
-  return {
+  const helpers: OrderHelpers = {
     calculateTotal,
     createOrderFromCart,
     updateOrderStatus,
     getOrder,
     getUserOrders,
   }
+
+  // The Local API only knows the orders slug as a string, so it returns untyped documents.
+  // The object above is checked against the helper signatures with that untyped
+  // document; which document type the collection really has is the caller's word.
+  return helpers as unknown as OrderHelpers<TOrder>
 }

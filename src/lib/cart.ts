@@ -2,6 +2,7 @@ import type { Payload, Where } from 'payload'
 
 import type { HelperAccessOptions } from './access.js'
 import type { DeleteExpiredCartsOptions } from './cartExpiry.js'
+import type { UntypedDocument } from './documents.js'
 import type { DocumentId } from './relationships.js'
 import type { EcommerceSlugs } from './slugs.js'
 
@@ -53,11 +54,38 @@ export const isSameCartLine = (
   variant?: null | string,
 ): boolean => isSameDocument(item?.product, productId) && (item?.variant || null) === (variant || null)
 
-export const createCartHelpers = (
+/** The helpers of `getEcommerce(payload).cart`. `TCart` is the type of a cart document. */
+export interface CartHelpers<TCart = UntypedDocument> {
+  /**
+   * Adds a product to the cart of the user or guest session, creating the cart when there
+   * is none or the existing one has expired. Every change to a cart moves its expiry to
+   * 30 days from now.
+   */
+  addToCart: (params: AddToCartParams) => Promise<TCart>
+  /** Removes every line from the cart. Throws when the cart does not exist or has expired. */
+  clearCart: (cartId: DocumentId) => Promise<TCart>
+  /** Deletes every expired cart in this collection and returns how many were deleted. */
+  deleteExpiredCarts: (options?: Omit<DeleteExpiredCartsOptions, 'cartsSlug'>) => Promise<{ deleted: number }>
+  /** Returns the cart of the user or guest session, or null when there is none or it has expired. */
+  getCart: (userId?: DocumentId, sessionId?: string) => Promise<null | TCart>
+  /**
+   * Removes the cart line for this product and variant. Other lines of the same product
+   * (other variants) stay. Does nothing when the cart has no such line.
+   */
+  removeFromCart: (params: RemoveFromCartParams) => Promise<TCart>
+  /**
+   * Sets the quantity of the cart line for this product and variant, or removes the line
+   * when the quantity is 0 or less. Throws `Item not found in cart` when the cart has no
+   * line for exactly this product + variant combination.
+   */
+  updateCartItem: (params: UpdateCartItemParams) => Promise<TCart>
+}
+
+export const createCartHelpers = <TCart = UntypedDocument>(
   payload: Payload,
   slugs: EcommerceSlugs,
   accessOptions: HelperAccessOptions = {},
-) => {
+): CartHelpers<TCart> => {
   const cartsSlug = slugs.carts
   // Ids passed to the helpers may arrive as text (from a URL or a JSON body); each is
   // converted to the id type of its collection before it is stored or used in a query.
@@ -235,7 +263,7 @@ export const createCartHelpers = (
     return await deleteExpiredCarts(payload, { req: accessOptions.req, ...options, cartsSlug })
   }
 
-  return {
+  const helpers: CartHelpers = {
     addToCart,
     updateCartItem,
     removeFromCart,
@@ -243,4 +271,9 @@ export const createCartHelpers = (
     clearCart,
     deleteExpiredCarts: deleteExpired,
   }
+
+  // The Local API only knows the carts slug as a string, so it returns untyped documents.
+  // The object above is checked against the helper signatures with that untyped
+  // document; which document type the collection really has is the caller's word.
+  return helpers as unknown as CartHelpers<TCart>
 }
