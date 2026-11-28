@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/xtr-dev/payload-ecommerce/compare/v0.1.0...v0.2.0) - 2026-11-28
+
+### Breaking
+- type the helper results with the host's generated types ([#24](https://github.com/xtr-dev/payload-ecommerce/issues/24)) ([cfac910](https://github.com/xtr-dev/payload-ecommerce/commit/cfac91019cfa3ddf48c952ab63f3f26294681ee1))
+- report why a coupon is refused, and refuse per-customer coupons for guests ([#23](https://github.com/xtr-dev/payload-ecommerce/issues/23)) ([675cdbe](https://github.com/xtr-dev/payload-ecommerce/commit/675cdbe2c2359726ca001403c57e0b803af873c6))
+
+### Features
+- export the server helpers as getEcommerce, deprecate useEcommerce ([#22](https://github.com/xtr-dev/payload-ecommerce/issues/22)) ([5b76337](https://github.com/xtr-dev/payload-ecommerce/commit/5b763370bc536214b212d20547fefc1c64a5efe7))
+
 ## [0.1.0] - 2026-11-27
 
 ### Breaking

@@ -3,6 +3,93 @@
   "schemaVersion": 2,
   "versions": [
     {
+      "version": "0.2.0",
+      "date": "2026-11-28",
+      "commit": "cfac910",
+      "breaking": true,
+      "groups": {
+        "breaking": [
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "type the helper results with the host's generated types (#24)",
+            "commit": "cfac910",
+            "hash": "cfac91019cfa3ddf48c952ab63f3f26294681ee1",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "report why a coupon is refused, and refuse per-customer coupons for guests (#23)",
+            "commit": "675cdbe",
+            "hash": "675cdbe2c2359726ca001403c57e0b803af873c6",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ],
+        "features": [
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "type the helper results with the host's generated types (#24)",
+            "commit": "cfac910",
+            "hash": "cfac91019cfa3ddf48c952ab63f3f26294681ee1",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "report why a coupon is refused, and refuse per-customer coupons for guests (#23)",
+            "commit": "675cdbe",
+            "hash": "675cdbe2c2359726ca001403c57e0b803af873c6",
+            "author": "Bas",
+            "breaking": true,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          },
+          {
+            "type": "feat",
+            "scope": null,
+            "description": "export the server helpers as getEcommerce, deprecate useEcommerce (#22)",
+            "commit": "5b76337",
+            "hash": "5b763370bc536214b212d20547fefc1c64a5efe7",
+            "author": "Bas",
+            "breaking": false,
+            "notes": [
+              {
+                "title": "Co-authored-by",
+                "text": "Claude Fable 5.2 <noreply@anthropic.com>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "version": "0.1.0",
       "date": "2026-11-27",
       "commit": "02e3801",
