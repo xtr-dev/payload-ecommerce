@@ -4,6 +4,7 @@ import type { EcommerceAccess } from '../lib/access.js'
 import type { EcommerceSlugs } from '../lib/slugs.js'
 
 import { cartExpiryFrom } from '../lib/cartExpiry.js'
+import { getRoundMoney } from '../lib/money.js'
 import { resolveUnitPrice } from '../lib/pricing.js'
 import { getRelationshipId } from '../lib/relationships.js'
 
@@ -96,6 +97,11 @@ export const createCarts = (
         }
 
         if (data.items && Array.isArray(data.items)) {
+          // Each line is rounded and then the sum, the same way createOrderFromCart
+          // computes an order's line totals and subtotal, so the cart a customer saw and
+          // the order made from it agree to the last unit. Without rounding, prices in
+          // major units leave floating point noise: 0.1 × 3 is 0.30000000000000004.
+          const roundMoney = getRoundMoney(req.payload)
           let subtotal = 0
           for (const item of data.items) {
             const productId = getRelationshipId(item.product)
@@ -119,10 +125,10 @@ export const createCarts = (
             }
             // A line whose product could not be loaded adds nothing to the subtotal.
             if (product) {
-              subtotal += resolveUnitPrice(product, item.variant) * item.quantity
+              subtotal += roundMoney(resolveUnitPrice(product, item.variant) * item.quantity)
             }
           }
-          data.subtotal = subtotal
+          data.subtotal = roundMoney(subtotal)
         }
 
         return data

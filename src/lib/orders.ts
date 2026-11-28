@@ -172,6 +172,9 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
       throw new Error('Cart is empty or not found')
     }
 
+    // Line totals and their sum are rounded like the cart's subtotal (see the carts
+    // collection), so the order matches the cart it was made from.
+    const roundMoney = getRoundMoney(payload)
     const items = []
     let calculatedSubtotal = 0
 
@@ -200,7 +203,7 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
 
       // The same function prices the cart's subtotal, so a variant's own price is used here too.
       const price = resolveUnitPrice(product, item.variant)
-      const total = price * item.quantity
+      const total = roundMoney(price * item.quantity)
 
       items.push({
         product: productId,
@@ -214,7 +217,7 @@ export const createOrderHelpers = <TOrder = UntypedDocument>(
     }
 
     // Use provided values or fall back to calculated/default values
-    const subtotal = orderData?.subtotal ?? calculatedSubtotal
+    const subtotal = orderData?.subtotal ?? roundMoney(calculatedSubtotal)
     const tax = orderData?.tax ?? 0
     const shipping = orderData?.shipping ?? 0
     const discount = orderData?.discount ?? 0

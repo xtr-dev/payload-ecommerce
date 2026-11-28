@@ -275,7 +275,7 @@ About the field:
 
 ### Money
 
-The plugin stores amounts as plain numbers and does not care whether they are major units (`19.99`) or integer minor units (`1999` cents), as long as you use one of them everywhere. What it calculates itself — a coupon's discount, the result of your `calculateTax` hook and the order total — it rounds with the `roundMoney` option:
+The plugin stores amounts as plain numbers and does not care whether they are major units (`19.99`) or integer minor units (`1999` cents), as long as you use one of them everywhere. What it calculates itself — a cart's subtotal, the line totals and subtotal of an order made with `createOrderFromCart`, a coupon's discount, the result of your `calculateTax` hook and the order total — it rounds with the `roundMoney` option:
 
 ```typescript
 payloadEcommerce({
@@ -397,7 +397,7 @@ A coupon is applied by the plugin when an order is created with it. Pass the cou
 2. Rejects the order with a validation error on `coupon` when a check fails. The error carries the refusal's `reason` (see [When an order is rejected](#when-an-order-is-rejected)).
 3. Sets `discount` — a percentage of the subtotal (capped by `maxDiscount`) or the fixed amount, rounded with [`roundMoney`](#money) and never more than the subtotal. A `discount` passed together with a coupon is ignored.
 4. Sets `shipping` to 0 for a `freeShipping` coupon (its `discount` is 0).
-5. Increments the coupon's `usageCount`, and gives that use back when the order is cancelled or refunded (see "Inventory and Order Side Effects").
+5. Increments the coupon's `usageCount`, and gives that use back when the order is cancelled or refunded (see "Inventory and Order Side Effects"). The count is the plugin's to keep: an update through the admin panel, REST or GraphQL cannot change `usageCount`, so saving a coupon never overwrites uses counted in the meantime. To correct it yourself, update it through the Local API.
 
 Tax and total are calculated after that, so they include the coupon's effect. Without a coupon, the caller's `discount` is used as is. Changing the coupon of an existing order does not recalculate it.
 

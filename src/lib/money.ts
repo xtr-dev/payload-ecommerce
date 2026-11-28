@@ -4,8 +4,9 @@ import { ECOMMERCE_CUSTOM_KEY } from './slugs.js'
 
 /**
  * Rounds an amount of money to the smallest unit the shop charges in. The plugin calls it
- * for every amount it calculates itself: a coupon's discount, the result of the
- * `calculateTax` hook and an order's total.
+ * for every amount it calculates itself: a cart's subtotal, the line totals and subtotal
+ * of an order made from a cart, a coupon's discount, the result of the `calculateTax` hook
+ * and an order's total.
  */
 export type RoundMoney = (amount: number) => number
 

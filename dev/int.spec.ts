@@ -2547,6 +2547,58 @@ describe('Ecommerce Plugin integration tests', () => {
       })
     })
 
+    describe('coupon usage count', () => {
+      const createCountedCoupon = async (name: string) =>
+        await payload.create({
+          collection: 'coupons',
+          data: {
+            code: `COUNT${name}${run.replace(/\D/g, '')}`,
+            status: 'active',
+            type: 'fixed',
+            usageCount: 4,
+            value: 1,
+          },
+        })
+      const usageCountOf = async (coupon: { id: number | string }) =>
+        (await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount
+
+      test('saving a coupon through REST, as the admin form does, does not overwrite the count', async () => {
+        const counted = await createCountedCoupon('REST')
+
+        // The admin form sends every field, with the count it had when the form was opened.
+        const response = await rest('PATCH', `coupons/${counted.id}`, {
+          body: { description: 'Edited in the admin panel', usageCount: 0 },
+          user: admin,
+        })
+
+        expect(response.status).toBe(200)
+        expect(response.json.doc.description).toBe('Edited in the admin panel')
+        expect(await usageCountOf(counted)).toBe(4)
+      })
+
+      test('an update that leaves the count alone does not write it, a deliberate one does', async () => {
+        const counted = await createCountedCoupon('LOCAL')
+        const writes: unknown[] = []
+        const updateOne = payload.db.updateOne
+        const spy = vi.spyOn(payload.db, 'updateOne').mockImplementation(async (args) => {
+          writes.push(args.data)
+          return await updateOne.call(payload.db, args)
+        })
+
+        try {
+          await payload.update({ id: counted.id, collection: 'coupons', data: { description: 'Unrelated' } })
+          expect(writes[0]).not.toHaveProperty('usageCount')
+
+          await payload.update({ id: counted.id, collection: 'coupons', data: { usageCount: 1 } })
+          expect(writes[1]).toMatchObject({ usageCount: 1 })
+        } finally {
+          spy.mockRestore()
+        }
+
+        expect(await usageCountOf(counted)).toBe(1)
+      })
+    })
+
     describe('order access token', () => {
       const createOrder = async (extra: Record<string, unknown> = {}) =>
         await payload.create({
@@ -2813,6 +2865,56 @@ describe('Ecommerce Plugin integration tests', () => {
       // The dev config taxes 10% of (33.33 − 3.33) = 3.
       expect(order).toMatchObject({ discount: 3.33, subtotal: 33.33, tax: 3, total: 33 })
       expect(ecommerce.orders.calculateTotal({ discount: 3.33, subtotal: 33.33, tax: 3.004 })).toBe(33)
+    })
+
+    test('a cart subtotal and the line totals of its order carry no floating point noise', async () => {
+      const ecommerce = getEcommerce(payload)
+      const run = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+      const createProduct = async (price: number) =>
+        await payload.create({
+          collection: 'products',
+          data: { price, status: 'active', title: `Float Noise Product ${price} ${run}` },
+        })
+      // In binary floating point 0.1 × 3 is 0.30000000000000004 and 0.7 + 0.1 + 0.3 is 1.0999999999999999.
+      const dime = await createProduct(0.1)
+      const seventy = await createProduct(0.7)
+      const sessionId = `float-noise-${run}`
+
+      await ecommerce.cart.addToCart({ productId: dime.id, quantity: 3, sessionId })
+      await ecommerce.cart.addToCart({ productId: seventy.id, quantity: 1, sessionId })
+      const cart = await ecommerce.cart.addToCart({ productId: dime.id, quantity: 1, sessionId })
+      expect(cart.subtotal).toBe(1.1)
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: { shippingAddress: address },
+      })
+      expect(order.items.map((item: { total: number }) => item.total)).toEqual([0.4, 0.7])
+      expect(order.subtotal).toBe(1.1)
+    })
+
+    test('a line total is rounded with the configured roundMoney before the lines are added up', async () => {
+      const ecommerce = getEcommerce(payload)
+      const run = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+      // A price with more decimals than the shop charges in: 3 × 0.335 is 1.005, charged as 1.01.
+      const product = await payload.create({
+        collection: 'products',
+        data: { price: 0.335, status: 'active', title: `Fraction Price Product ${run}` },
+      })
+
+      const cart = await ecommerce.cart.addToCart({
+        productId: product.id,
+        quantity: 3,
+        sessionId: `fraction-price-${run}`,
+      })
+      expect(cart.subtotal).toBe(1.01)
+
+      const order = await ecommerce.orders.createOrderFromCart({
+        cartId: cart.id,
+        orderData: { shippingAddress: address },
+      })
+      expect(order.items[0].total).toBe(1.01)
+      expect(order.subtotal).toBe(1.01)
     })
   })
 

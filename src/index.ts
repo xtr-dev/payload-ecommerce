@@ -103,7 +103,8 @@ export type PayloadEcommerceConfig = {
   isAdmin?: IsAdmin
 
   /**
-   * Rounds the amounts the plugin calculates (a coupon's discount, the result of the
+   * Rounds the amounts the plugin calculates (a cart's subtotal, the line totals and
+   * subtotal of an order made from a cart, a coupon's discount, the result of the
    * `calculateTax` hook and an order's total) to the smallest unit you charge in.
    * Default: two decimals, for prices in major units (19.99). When your prices are integer
    * minor units (1999 cents), pass `Math.round` so 10% of 1995 becomes 200, not 199.5.
