@@ -82,7 +82,7 @@ No collection slug is hardcoded. The collections are factories (`createProducts(
 
 ### Where the logic lives
 - `src/lib/access.ts` - default access rules, `defaultIsAdmin`, and how helpers pass `overrideAccess`/`req`/`user`
-- `src/lib/money.ts` - `roundMoney` (default two decimals; `Math.round` for integer cents), read by hooks and helpers through `getRoundMoney(payload)` and applied to coupon discount, hook tax and order total
+- `src/lib/money.ts` - `roundMoney` (default two decimals; `Math.round` for integer cents), read by hooks and helpers through `getRoundMoney(payload)` and applied to cart subtotal, the line totals and subtotal of `createOrderFromCart`, coupon discount, hook tax and order total
 - `src/lib/ids.ts` - `toDocumentId`: every helper converts incoming ids to the collection's id type (numeric strings on SQL)
 - `src/lib/totals.ts` - the only place an order total is computed
 - `src/lib/coupons.ts` - coupon rules (`evaluateCoupon`), shared by `validateCoupon` and the Orders hook

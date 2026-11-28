@@ -92,6 +92,14 @@ export const createCoupons = (slugs: EcommerceSlugs): CollectionConfig => ({
       type: 'number',
       defaultValue: 0,
       min: 0,
+      // The count belongs to the orders that use the coupon. The admin panel submits
+      // read-only fields along with the rest of the form, holding the value from when the
+      // form was opened, so without this rule saving a coupon would wipe out the uses
+      // counted since. REST and GraphQL updates are refused the same way; server code that
+      // really means to correct the count does so through the Local API.
+      access: {
+        update: () => false,
+      },
       admin: {
         description:
           'Orders that currently use this coupon. Counted when an order is created and given back when it is cancelled or refunded.',
@@ -164,7 +172,16 @@ export const createCoupons = (slugs: EcommerceSlugs): CollectionConfig => ({
   ],
   hooks: {
     beforeChange: [
-      ({ data }) => {
+      ({ data, operation, originalDoc }) => {
+        // Payload fills `data` with the stored value of every field an update leaves out
+        // and then saves all of `data`. For `usageCount` that would write back the count
+        // read at the start of this update, undoing an order that counted a use in
+        // between. Removing an unchanged count from `data` leaves the stored value alone;
+        // a count the caller actually changes is still saved.
+        if (operation === 'update' && data.usageCount === originalDoc?.usageCount) {
+          delete data.usageCount
+        }
+
         if (data.validUntil) {
           const now = new Date()
           const validUntil = new Date(data.validUntil)
