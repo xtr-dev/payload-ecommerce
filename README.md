@@ -27,7 +27,7 @@ Not included: payment processing, emails and shipping rates. Payments are shown 
 pnpm add @xtr-dev/payload-ecommerce
 ```
 
-Requires `payload` `^3.37.0`. The plugin is developed and tested on Payload 3.94 (Next.js 16), and CI also runs the tests on 3.37, with SQLite and MongoDB.
+Requires `payload` `^3.37.0`. The plugin is developed and tested on Payload 3.94 (Next.js 16), and CI also runs the tests on 3.37, with SQLite, MongoDB and Postgres.
 
 ### Add to Payload Config
 
@@ -530,7 +530,7 @@ The order records what it holds in two read-only fields, `inventoryReduced` and 
 
 Limits:
 
-- The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock, coupon usage or order flag columns have custom database names, the plugin falls back to read-then-write, which can oversell or restore twice under concurrency. It logs a warning the first time that happens (`[payload-ecommerce] No atomic … update …`), because the statements use parts of the adapters that are not public API. The plugin's tests assert that the atomic statements are used on SQLite and MongoDB on Payload 3.37 and 3.94; if you see the warning after a Payload upgrade, please open an issue.
+- The atomic statements are implemented for MongoDB and for the SQL adapters (SQLite, Postgres). With another adapter, or when the product stock, coupon usage or order flag columns have custom database names, the plugin falls back to read-then-write, which can oversell or restore twice under concurrency. It logs a warning the first time that happens (`[payload-ecommerce] No atomic … update …`), because the statements use parts of the adapters that are not public API. The plugin's tests assert that the atomic statements are used on SQLite, MongoDB and Postgres on Payload 3.37 and 3.94; if you see the warning after a Payload upgrade, please open an issue.
 - On MongoDB, concurrent orders in transactions that touch the same product can fail with MongoDB's transient "write conflict" error even when enough stock is left. Nothing is oversold; retry the order.
 - Giving back a cancelled or refunded order's stock is one statement per product or variant. Inside a database transaction (Postgres, MongoDB on a replica set, SQLite with `transactionOptions` set) a database error halfway rolls the whole update back, the cancellation included, and it can simply be repeated. Without transactions (the SQLite adapter's default) nothing is rolled back: the update fails with the database's error, but the order is already cancelled, the stock of the lines before the failing one is back and the rest is not, and `inventoryReduced` is already cleared, so cancelling again restores nothing more. Compare the order's lines with the products' stock and correct the rest by hand (`ecommerce.products.restoreInventory`). The plugin cannot repair this itself: the lines live in different rows, so no single statement covers them, and undoing the lines already restored would need the same failing database and could itself fail or take units another order has bought since. Creating an order does not have this gap, because a new order can be deleted again; a cancellation that half happened cannot be taken back. Use a database with transactions if this matters to you.
 - Simultaneous updates of the same order are otherwise handled by Payload and the database, not by the plugin: without transactions (the SQLite adapter's default) Payload can reject all but one of them, and an edit that was read before a cancellation and written after it can put the old status back. In both cases the order's stock and coupon use are still given back at most once, and an order left open that way still holds them.
@@ -586,17 +586,28 @@ pnpm dev
 pnpm build
 
 # Checks run by CI and before a release
-pnpm typecheck   # src, then the helper result types against the built declarations (dev/type-tests)
+pnpm typecheck      # src, then the helper result types against the built declarations (dev/type-tests)
 pnpm lint
-pnpm test        # integration tests (vitest) on a temporary SQLite database
-pnpm test:mongo  # the same tests on an in-memory MongoDB replica set
-pnpm test:pack   # build, pack and import every published export
+pnpm test           # integration tests (vitest) on a temporary SQLite database
+pnpm test:mongo     # the same tests on an in-memory MongoDB replica set
+pnpm test:postgres  # the same tests on a Postgres server, see below
+pnpm test:pack      # build, pack and import every published export
 
 # The integration tests with a coverage report for src/
 pnpm test:coverage
 ```
 
 `pnpm test:mongo` downloads a MongoDB server binary on its first run (`mongodb-memory-server`). The demo itself runs on MongoDB when `DATABASE_ADAPTER=mongodb` and `DATABASE_URI` (a MongoDB connection string) are set; SQLite is the default.
+
+`pnpm test:postgres` needs a running Postgres server and `DATABASE_URI` set to a connection string for it. The user must be allowed to create databases: each run creates two databases with a unique name and drops them afterwards, and writes nothing to the database named in the URI.
+
+```bash
+docker run --rm -d --name ecommerce-test-postgres -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:5432:5432 postgres:16
+DATABASE_URI=postgres://postgres:postgres@127.0.0.1:5432/postgres pnpm test:postgres
+docker stop ecommerce-test-postgres
+```
+
+The demo runs on Postgres the same way, with `DATABASE_ADAPTER=postgres` and `DATABASE_URI` naming the database to use.
 
 ## License
 

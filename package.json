@@ -44,6 +44,7 @@
     "test:coverage": "vitest run --coverage",
     "test:int": "vitest",
     "test:mongo": "cross-env DATABASE_ADAPTER=mongodb vitest run",
+    "test:postgres": "cross-env DATABASE_ADAPTER=postgres vitest run",
     "test:pack": "pnpm build && sh scripts/verify-packed-exports.sh",
     "test:types": "pnpm build:types && tsc -p dev/type-tests/default-slugs && tsc -p dev/type-tests/renamed-slugs",
     "typecheck": "tsc --noEmit && pnpm test:types"

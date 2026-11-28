@@ -1,4 +1,5 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
+import { postgresAdapter } from '@payloadcms/db-postgres'
 import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
@@ -18,28 +19,35 @@ if (!process.env.ROOT_DIR) {
   process.env.ROOT_DIR = dirname
 }
 
-// SQLite is the default. DATABASE_ADAPTER=mongodb switches to MongoDB, which is how
-// `pnpm test:mongo` runs the integration tests against the plugin's MongoDB-specific code
-// (see vitest.config.js); DATABASE_URI must then be a MongoDB connection string.
-const useMongoDB = process.env.DATABASE_ADAPTER === 'mongodb'
+// SQLite is the default. DATABASE_ADAPTER=mongodb or DATABASE_ADAPTER=postgres switches to
+// that database, which is how `pnpm test:mongo` and `pnpm test:postgres` run the integration
+// tests against the plugin's adapter-specific code (see vitest.config.js); DATABASE_URI must
+// then be a connection string for that database.
+const adapterName = process.env.DATABASE_ADAPTER || 'sqlite'
 
-if (useMongoDB && !process.env.DATABASE_URI) {
-  throw new Error('DATABASE_ADAPTER=mongodb needs DATABASE_URI set to a MongoDB connection string')
+if (!['mongodb', 'postgres', 'sqlite'].includes(adapterName)) {
+  throw new Error(`DATABASE_ADAPTER must be sqlite, mongodb or postgres, but is "${adapterName}"`)
+}
+if (adapterName !== 'sqlite' && !process.env.DATABASE_URI) {
+  throw new Error(`DATABASE_ADAPTER=${adapterName} needs DATABASE_URI set to a connection string for that database`)
 }
 
-const databaseAdapter = useMongoDB
-  ? mongooseAdapter({
-      // Creates every collection and its indexes while connecting. Without this MongoDB
-      // creates them in the background on first use, and a transaction that touches a
-      // collection still being created fails with "Collection namespace is already in use".
-      ensureIndexes: true,
-      url: process.env.DATABASE_URI || '',
-    })
-  : sqliteAdapter({
-      client: {
-        url: process.env.DATABASE_URI || `file:${path.resolve(dirname, 'payload.db')}`,
-      },
-    })
+const databaseAdapter =
+  adapterName === 'mongodb'
+    ? mongooseAdapter({
+        // Creates every collection and its indexes while connecting. Without this MongoDB
+        // creates them in the background on first use, and a transaction that touches a
+        // collection still being created fails with "Collection namespace is already in use".
+        ensureIndexes: true,
+        url: process.env.DATABASE_URI || '',
+      })
+    : adapterName === 'postgres'
+      ? postgresAdapter({ pool: { connectionString: process.env.DATABASE_URI } })
+      : sqliteAdapter({
+          client: {
+            url: process.env.DATABASE_URI || `file:${path.resolve(dirname, 'payload.db')}`,
+          },
+        })
 
 export default buildConfig({
   admin: {

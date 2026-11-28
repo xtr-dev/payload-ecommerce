@@ -2,11 +2,11 @@ import type { Payload } from 'payload'
 
 import config from '@payload-config'
 import { REST_GET, REST_PATCH, REST_POST } from '@payloadcms/next/routes'
-import { getPayload } from 'payload'
+import { commitTransaction, createLocalReq, getPayload, initTransaction, killTransaction } from 'payload'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
 import { createOrders as createOrdersCollection } from '../src/collections/Orders.js'
-import { adjustCouponUsage, adjustStock, claimOrderRelease } from '../src/lib/atomic.js'
+import { adjustCouponUsage, adjustStock, claimOrderRelease, hasActiveTransaction } from '../src/lib/atomic.js'
 import { toCouponPreview } from './lib/couponPreview.js'
 import {
   createPlaceholderImage,
@@ -46,10 +46,16 @@ const createOrders = (options: Parameters<typeof createOrdersCollection>[0] = {}
 const usesMongoDB = process.env.DATABASE_ADAPTER === 'mongodb'
 
 /**
+ * True when Payload runs its operations in database transactions: on MongoDB and on
+ * Postgres (`pnpm test:postgres`). The default SQLite test database has none.
+ */
+const usesTransactions = usesMongoDB || process.env.DATABASE_ADAPTER === 'postgres'
+
+/**
  * Tells whether an operation failed with MongoDB's transient "write conflict": two
  * transactions wrote the same document and MongoDB aborted one of them. It says nothing
  * about the outcome the operation would have had, and the documented answer is to retry.
- * It never occurs on SQLite.
+ * It never occurs on SQLite or Postgres.
  */
 const isTransientWriteConflict = (error: unknown): boolean => {
   const { code, errorLabels, message } = (error ?? {}) as {
@@ -69,7 +75,7 @@ const isTransientWriteConflict = (error: unknown): boolean => {
  * Starts all operations at once and returns how each one ended, in the same order. An
  * operation that MongoDB aborted with a transient write conflict is run again, together
  * with the others that were aborted, until each has either succeeded or failed for a real
- * reason, the way a storefront would retry. On SQLite this is a single round.
+ * reason, the way a storefront would retry. On SQLite and Postgres this is a single round.
  */
 const settleConcurrently = async <T>(
   operations: Array<() => Promise<T>>,
@@ -926,8 +932,9 @@ describe('Ecommerce Plugin integration tests', () => {
 
   // Stock and coupon usage are changed with one conditional database statement per order
   // line (see src/lib/atomic.ts). On SQLite the test database has no transactions, so a
-  // failed order is cleaned up by the plugin itself; on MongoDB (`pnpm test:mongo`) every
-  // operation runs in a transaction and a failed order is rolled back.
+  // failed order is cleaned up by the plugin itself; on MongoDB (`pnpm test:mongo`) and
+  // Postgres (`pnpm test:postgres`) every operation runs in a transaction and a failed
+  // order is rolled back.
   describe('order side effects', () => {
     const address = {
       address1: '1 Main Street',
@@ -2042,10 +2049,10 @@ describe('Ecommerce Plugin integration tests', () => {
     })
   })
 
-  // By default these run on SQLite, where document ids are numbers. The plugin used to
-  // recognise only string ids (MongoDB) as "not populated", so numeric ids were read as
-  // populated documents without an `id` and the related product or coupon was lost.
-  // `pnpm test:mongo` runs the same flow with string ids.
+  // By default these run on SQLite, where document ids are numbers, as they are on Postgres.
+  // The plugin used to recognise only string ids (MongoDB) as "not populated", so numeric
+  // ids were read as populated documents without an `id` and the related product or coupon
+  // was lost. `pnpm test:mongo` runs the same flow with string ids.
   describe('order flow with the id type of the database', () => {
     const address = {
       address1: '1 Main Street',
@@ -3472,8 +3479,8 @@ describe('Ecommerce Plugin integration tests', () => {
       expect(toDocumentId(payload, 'products', null)).toBeNull()
     })
 
-    // On SQLite every id below is a numeric string such as '12', the form in which an id
-    // arrives from a URL parameter or a form; on MongoDB String() changes nothing.
+    // On SQLite and Postgres every id below is a numeric string such as '12', the form in
+    // which an id arrives from a URL parameter or a form; on MongoDB String() changes nothing.
     test('cart, order, coupon and product helpers accept ids as strings', async () => {
       const ecommerce = getEcommerce(payload)
       const run = `${Date.now()}`
@@ -3739,6 +3746,60 @@ describe('Ecommerce Plugin integration tests', () => {
       expect((await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount).toBe(1)
       expect((await payload.findByID({ id: order.id, collection: 'orders' })).inventoryReduced).toBe(false)
     })
+
+    // On SQLite's default setup there is no transaction to join, so this runs on MongoDB
+    // and Postgres only. It is what catches a statement sent on another connection than the
+    // request's: such a statement would be visible outside the transaction straight away and
+    // would survive the rollback.
+    test.runIf(usesTransactions)(
+      'statements given the request of an open transaction are part of it and are rolled back with it',
+      async () => {
+        const { coupon, order, product } = await createFixtures('transaction')
+
+        const readOutside = async () => ({
+          inventoryReduced: (await payload.findByID({ id: order.id, collection: 'orders' })).inventoryReduced,
+          stock: (await payload.findByID({ id: product.id, collection: 'products' })).inventory.quantity,
+          usageCount: (await payload.findByID({ id: coupon.id, collection: 'coupons' })).usageCount ?? 0,
+        })
+        const before = { inventoryReduced: true, stock: 5, usageCount: 0 }
+        expect(await readOutside()).toEqual(before)
+
+        const req = await createLocalReq({}, payload)
+        await initTransaction(req)
+        try {
+          expect(await hasActiveTransaction(payload, req)).toBe(true)
+
+          expect(await adjustStock(payload, { delta: -5, productId: product.id, productsSlug: 'products', req })).toBe(true)
+          expect(await adjustCouponUsage(payload, { couponId: coupon.id, couponsSlug: 'coupons', delta: 1, req })).toBe(true)
+          expect(
+            await claimOrderRelease(payload, { flag: 'inventoryReduced', orderId: order.id, ordersSlug: 'orders', req }),
+          ).toBe(true)
+
+          // The transaction sees its own writes; nobody else does until it commits.
+          const inside = await payload.findByID({ id: product.id, collection: 'products', req })
+          expect(inside.inventory.quantity).toBe(0)
+          expect(await readOutside()).toEqual(before)
+        } finally {
+          await killTransaction(req)
+        }
+
+        expect(await readOutside()).toEqual(before)
+
+        // The same statements in a transaction that commits are kept.
+        const committing = await createLocalReq({}, payload)
+        await initTransaction(committing)
+        try {
+          expect(
+            await adjustStock(payload, { delta: -5, productId: product.id, productsSlug: 'products', req: committing }),
+          ).toBe(true)
+          await commitTransaction(committing)
+        } catch (error) {
+          await killTransaction(committing)
+          throw error
+        }
+        expect(await readOutside()).toEqual({ ...before, stock: 0 })
+      },
+    )
 
     test('an order holds its stock and coupon through the atomic statements', async () => {
       const { coupon, product } = await createFixtures('order')
