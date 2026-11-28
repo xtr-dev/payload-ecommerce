@@ -9,6 +9,7 @@ import type { StockOrderRejection } from '../lib/orderRejection.js'
 import { getRelationshipId } from '../lib/relationships.js'
 import { calculateOrderTotal } from '../lib/totals.js'
 import { getRoundMoney } from '../lib/money.js'
+import { generateOrderAccessToken, ORDER_ACCESS_TOKEN_FIELD } from '../lib/orderAccessToken.js'
 import { OrderRejectedError } from '../lib/orderRejection.js'
 
 /**
@@ -214,6 +215,23 @@ export const createOrders = (
       admin: {
         position: 'sidebar',
         readOnly: true,
+      },
+    },
+    {
+      // The secret a guest reaches their order with (see getOrderByToken). Nobody reads or
+      // writes it through REST, GraphQL or the admin panel, admins included: whoever can
+      // read it can open the order without signing in, and it cannot be used as a query
+      // filter to guess it character by character either. Server code reads it with the
+      // Local API, which bypasses field access by default.
+      name: ORDER_ACCESS_TOKEN_FIELD,
+      type: 'text',
+      access: {
+        create: () => false,
+        read: () => false,
+        update: () => false,
+      },
+      admin: {
+        hidden: true,
       },
     },
     {
@@ -454,6 +472,15 @@ export const createOrders = (
               .toString()
               .padStart(3, '0')
             data.orderNumber = `ORD-${timestamp}-${random}`
+          }
+
+          // The access token is always the plugin's own random value: one chosen by the
+          // caller of a create could be weak or shared between orders, and one changed by
+          // an update would silently break the link the customer already has.
+          if (operation === 'create') {
+            data[ORDER_ACCESS_TOKEN_FIELD] = generateOrderAccessToken()
+          } else {
+            delete data[ORDER_ACCESS_TOKEN_FIELD]
           }
 
           // A coupon on a new order is applied here rather than trusted from the caller: the

@@ -35,7 +35,7 @@ pnpm dev:generate-types    # Regenerate Payload types
 
 ### Collections Created
 - **products** - Catalog with title, slug (generated when empty), price, variants, images and optional stock tracking. `inventory.lowStockThreshold` is only a field; nothing alerts on it
-- **orders** - Items, addresses (shipping: name, address1, city, country required; state/postalCode optional; billing all optional), optional `user`, `customerEmail` for guests, status and payment status fields. The total is always computed (`subtotal − discount + tax + shipping`). Creating an order checks and reduces stock and counts the coupon; moving it to cancelled/refunded puts both back
+- **orders** - Items, addresses (shipping: name, address1, city, country required; state/postalCode optional; billing all optional), optional `user`, `customerEmail` for guests, a generated `accessToken` for guest order links, status and payment status fields. The total is always computed (`subtotal − discount + tax + shipping`). Creating an order checks and reduces stock and counts the coupon; moving it to cancelled/refunded puts both back
 - **carts** - For a user or guest session, expiring 30 days after the last change. Expired carts are ignored by the helpers and removed by `deleteExpiredCarts`
 - **categories** - Name, slug (generated when empty) and an optional `parent` relationship (no tree helpers)
 - **coupons** - Percentage, fixed and free-shipping codes, validated and applied when an order is created
@@ -87,6 +87,7 @@ No collection slug is hardcoded. The collections are factories (`createProducts(
 - `src/lib/totals.ts` - the only place an order total is computed
 - `src/lib/coupons.ts` - coupon rules (`evaluateCoupon`), shared by `validateCoupon` and the Orders hook
 - `src/lib/orderRejection.ts` - `OrderRejectedError` (a ValidationError with the cause as `rejection` and `data.rejection`) and `getOrderRejection`; every stock or coupon refusal of an order is thrown through it
+- `src/lib/orderAccessToken.ts` - generation and constant-time comparison of `orders.accessToken`. The field has field access `false` for create/read/update, the Orders hook sets it on create and drops it from updates, and `getOrderByToken` (`src/lib/orders.ts`) is the lookup for guests
 - `src/lib/atomic.ts` - conditional single-statement stock and coupon-usage updates (SQL via the adapter's `execute`, MongoDB via `$inc`), with a non-atomic fallback that logs a one-time warning. The "atomic updates" tests in `dev/int.spec.ts` fail when the fallback is taken
 - `src/lib/cartExpiry.ts` - cart lifetime, `deleteExpiredCarts` and the optional jobs task
 - `src/lib/slug.ts` - slug generation hook shared by products and categories

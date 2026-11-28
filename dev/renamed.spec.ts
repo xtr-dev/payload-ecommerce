@@ -166,6 +166,11 @@ describe('renamed collections', () => {
       total: 3485,
     })
     expect((await ecommerce.orders.getOrder(order.id)).id).toBe(order.id)
+    // The access token is stored in and looked up from the renamed orders collection.
+    expect(
+      (await ecommerce.orders.getOrderByToken({ orderNumber: order.orderNumber, token: order.accessToken }))?.id,
+    ).toBe(order.id)
+    expect(await ecommerce.orders.getOrderByToken({ orderId: order.id, token: 'wrong' })).toBeNull()
 
     const afterOrder = await ecommerce.products.getProduct(product.id)
     expect(afterOrder.inventory.quantity).toBe(3)

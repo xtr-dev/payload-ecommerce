@@ -16,6 +16,7 @@ import {
   getRelationshipId,
   isCartExpired,
   isSameCartLine,
+  matchesOrderAccessToken,
   defaultIsAdmin,
   payloadEcommerce,
   resolveUnitPrice,
@@ -2543,6 +2544,154 @@ describe('Ecommerce Plugin integration tests', () => {
         })
         expect(patched.status).toBe(200)
         expect(patched.json.doc.trackingNumber).toBe('TRACK-1')
+      })
+    })
+
+    describe('order access token', () => {
+      const createOrder = async (extra: Record<string, unknown> = {}) =>
+        await payload.create({
+          collection: 'orders',
+          data: {
+            items: [{ price: 10, product: activeProduct.id, quantity: 1, total: 10 }],
+            shippingAddress: address,
+            subtotal: 10,
+            ...extra,
+          },
+        })
+
+      test('every new order gets its own random token, whatever the caller passes', async () => {
+        const first = await createOrder({ accessToken: 'chosen-by-the-caller' })
+        const second = await createOrder({ accessToken: 'chosen-by-the-caller' })
+
+        // 32 random bytes as base64url.
+        expect(first.accessToken).toMatch(/^[\w-]{43}$/)
+        expect(second.accessToken).toMatch(/^[\w-]{43}$/)
+        expect(first.accessToken).not.toBe(second.accessToken)
+      })
+
+      test('an update does not change the token', async () => {
+        const order = await createOrder()
+
+        const updated = await payload.update({
+          id: order.id,
+          collection: 'orders',
+          data: { accessToken: 'replaced', notes: 'Leave at the door' },
+        })
+        expect(updated.notes).toBe('Leave at the door')
+
+        const stored = await payload.findByID({ id: order.id, collection: 'orders' })
+        expect(stored.accessToken).toBe(order.accessToken)
+      })
+
+      test('the token is not readable or usable as a filter through access control', async () => {
+        expect(aliceOrder.accessToken).toBeTruthy()
+
+        const asOwner = await payload.findByID({
+          id: aliceOrder.id,
+          collection: 'orders',
+          overrideAccess: false,
+          user: { ...alice, collection: 'users' },
+        })
+        expect(asOwner.id).toBe(aliceOrder.id)
+        expect(asOwner).not.toHaveProperty('accessToken')
+
+        for (const user of [alice, admin]) {
+          const read = await rest('GET', `orders/${aliceOrder.id}`, { user })
+          expect(read.status).toBe(200)
+          expect(read.json).not.toHaveProperty('accessToken')
+          expect(JSON.stringify(read.json)).not.toContain(aliceOrder.accessToken)
+
+          // Filtering on the field would confirm a guessed prefix one character at a time.
+          const filtered = await rest(
+            'GET',
+            `orders?where[accessToken][like]=${aliceOrder.accessToken.slice(0, 4)}`,
+            { user },
+          )
+          expect(filtered.json?.docs ?? []).toEqual([])
+        }
+
+        const patched = await rest('PATCH', `orders/${aliceOrder.id}`, {
+          body: { accessToken: 'set-through-rest' },
+          user: admin,
+        })
+        expect(patched.status).toBe(200)
+        expect(JSON.stringify(patched.json)).not.toContain(aliceOrder.accessToken)
+        const stored = await payload.findByID({ id: aliceOrder.id, collection: 'orders' })
+        expect(stored.accessToken).toBe(aliceOrder.accessToken)
+      })
+
+      test('getOrderByToken returns the order for its id or number and its token only', async () => {
+        const { orders } = getEcommerce(payload)
+        const token = guestOrder.accessToken
+
+        const byId = await orders.getOrderByToken({ orderId: guestOrder.id, token })
+        expect(byId?.id).toBe(guestOrder.id)
+        // Relationships are populated, as getOrder does.
+        expect(byId?.items[0].product.title).toBe(activeProduct.title)
+
+        // The id as it arrives from a URL.
+        expect((await orders.getOrderByToken({ orderId: String(guestOrder.id), token }))?.id).toBe(guestOrder.id)
+        expect(
+          (await orders.getOrderByToken({ orderNumber: guestOrder.orderNumber, token }))?.id,
+        ).toBe(guestOrder.id)
+
+        // Another order's token, a truncated token and no token open nothing.
+        for (const wrong of [aliceOrder.accessToken, token.slice(0, -1), `${token}x`, '', undefined, null, 42, [token]]) {
+          expect(await orders.getOrderByToken({ orderId: guestOrder.id, token: wrong })).toBeNull()
+          expect(await orders.getOrderByToken({ orderNumber: guestOrder.orderNumber, token: wrong })).toBeNull()
+        }
+      })
+
+      test('getOrderByToken answers null for orders that do not exist and for unusable input', async () => {
+        const { orders } = getEcommerce(payload)
+        const token = guestOrder.accessToken
+
+        expect(await orders.getOrderByToken({ orderNumber: 'ORD-0-000', token })).toBeNull()
+        expect(await orders.getOrderByToken({ orderId: 'not-an-id', token })).toBeNull()
+        expect(await orders.getOrderByToken({ orderId: { not_equals: 0 }, token })).toBeNull()
+        expect(await orders.getOrderByToken({ orderNumber: { like: 'ORD' }, token })).toBeNull()
+        expect(await orders.getOrderByToken({ token })).toBeNull()
+        // Naming the order twice is a mistake of the caller, not a way to widen the search.
+        expect(
+          await orders.getOrderByToken({ orderId: guestOrder.id, orderNumber: guestOrder.orderNumber, token }),
+        ).toBeNull()
+      })
+
+      test('getOrderByToken works for helpers that otherwise act as a user', async () => {
+        const asBob = getEcommerce(payload, { overrideAccess: false, user: { ...bob, collection: 'users' } })
+
+        await expect(asBob.orders.getOrder(guestOrder.id)).rejects.toThrow()
+        expect(
+          (await asBob.orders.getOrderByToken({ orderId: guestOrder.id, token: guestOrder.accessToken }))?.id,
+        ).toBe(guestOrder.id)
+      })
+
+      test('createOrderFromCart returns the token, also when the helpers act as a user', async () => {
+        const asAlice = getEcommerce(payload, { overrideAccess: false, user: { ...alice, collection: 'users' } })
+        await asAlice.cart.addToCart({ productId: activeProduct.id, quantity: 1, userId: alice.id })
+        const cart = await asAlice.cart.getCart(alice.id)
+
+        const order = await asAlice.orders.createOrderFromCart({
+          cartId: cart.id,
+          orderData: { shippingAddress: address },
+        })
+
+        expect(order.accessToken).toMatch(/^[\w-]{43}$/)
+        expect((await asAlice.orders.getOrder(order.id))).not.toHaveProperty('accessToken')
+        expect(
+          (await asAlice.orders.getOrderByToken({ orderId: order.id, token: order.accessToken }))?.id,
+        ).toBe(order.id)
+      })
+
+      test('matchesOrderAccessToken never matches an order without a token', () => {
+        expect(matchesOrderAccessToken({ accessToken: 'secret' }, 'secret')).toBe(true)
+        expect(matchesOrderAccessToken({ accessToken: 'secret' }, 'Secret')).toBe(false)
+        expect(matchesOrderAccessToken({ accessToken: 'secret' }, 'secret-and-more')).toBe(false)
+        for (const order of [{}, { accessToken: null }, { accessToken: '' }, null, undefined]) {
+          for (const token of ['', undefined, null, 'secret']) {
+            expect(matchesOrderAccessToken(order, token)).toBe(false)
+          }
+        }
       })
     })
 

@@ -39,6 +39,7 @@ expectTrue<Equal<Result<typeof ecommerce.coupons.decrementCouponUsage>, Coupon>>
 // The lookups that can find nothing say so.
 expectTrue<Equal<Result<typeof ecommerce.cart.getCart>, Cart | null>>()
 expectTrue<Equal<Result<typeof ecommerce.coupons.findCouponByCode>, Coupon | null>>()
+expectTrue<Equal<Result<typeof ecommerce.orders.getOrderByToken>, null | Order>>()
 
 // The exported helper type and the deprecated alias carry the same types.
 expectTrue<Equal<typeof ecommerce, EcommerceHelpers>>()
